@@ -5,14 +5,20 @@ import openai
 openai.api_key = os.environ["OPENAI_APIKEY"]
 
 # Function to send a message to the OpenAI chatbot model and return its response
+
+
 def send_message(message_log):
     # Use OpenAI's ChatCompletion API to get the chatbot's response
     response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",  # The name of the OpenAI chatbot model to use
-        messages=message_log,   # The conversation history up to this point, as a list of dictionaries
-        max_tokens=3800,        # The maximum number of tokens (words or subwords) in the generated response
-        stop=None,              # The stopping sequence for the generated response, if any (not used here)
-        temperature=0.7,        # The "creativity" of the generated response (higher temperature = more creative)
+        # The conversation history up to this point, as a list of dictionaries
+        messages=message_log,
+        # The maximum number of tokens (words or subwords) in the generated response
+        max_tokens=3800,
+        # The stopping sequence for the generated response, if any (not used here)
+        stop=None,
+        # The "creativity" of the generated response (higher temperature = more creative)
+        temperature=0.7,
     )
 
     # Find the first response from the chatbot that has text in it (some responses may not have text)
@@ -26,9 +32,15 @@ def send_message(message_log):
 
 # Main function that runs the chatbot
 def main():
+
+    # List of possible prompts to give the Chatbot:
+
+    content_list = ["You are one of four characters in the game 'Among Us': 'Blue', 'Red', 'Green', or 'Yellow'. You are the imposter. What would you say if someone accused you of being an imposter? ",
+                    ]
+
     # Initialize the conversation history with a message from the chatbot
     message_log = [
-        {"role": "system", "content": "You are a helpful assistant."}
+        {"role": "system", "content": ""}
     ]
 
     # Set a flag to keep track of whether this is the first request in the conversation
@@ -42,7 +54,8 @@ def main():
             message_log.append({"role": "user", "content": user_input})
 
             # Add a message from the chatbot to the conversation history
-            message_log.append({"role": "assistant", "content": "You are a helpful assistant."})
+            message_log.append(
+                {"role": "assistant", "content": "You are a helpful assistant."})
 
             # Send the conversation history to the chatbot and get its response
             response = send_message(message_log)
