@@ -2,24 +2,27 @@
 from os import mkdir, environ
 from os.path import isdir, join
 from tqdm import tqdm
+import random
 
 import openai
+
+# RED, YELLOW, GREEN, BLUE
 
 openai.api_key = environ["OPENAI_APIKEY"]
 
 # Function to send a message to the OpenAI chatbot model and return its response
 
-def get_response(user_input, character, accuser, room, is_imposter):
+def get_response(history, character, room, is_imposter):
     
-    player_char = "an Imposter" if is_imposter else "not an Imposter"
+    player_char = "the Imposter" if is_imposter else "not the Imposter"
     
     # EXTRA STRINGS: "Utilize the following format for response: [next_player, response_string]. The value of 'next_player' is the player that you are talking to, and 'response_string' is your response."
     
     message_log = [
-        {"role": "system", "content": f"You are a twitch streamer playing a casual game of 'Among Us' with your friends. Use Among Us slang very liberally. There are four characters in this game: Blue, Red, Green, Yellow. You are currently the player {character} and are {player_char}. The room that you are currently located in is {room}. {accuser} is one who is prompting you. Respond to the given prompts the way that your player would respond."}
+        {"role": "system", "content": f"You are a twitch streamer playing a casual game of 'Among Us' with your friends. Use Among Us slang very liberally. There are four characters in this game: Blue, Red, Green, Yellow. You are currently the player {character} and are {player_char}. The room that you are currently located in is {room}. Respond to the given prompts the way that your player would respond."}
     ]
     
-    message_log.append({"role": "user", "content": user_input})
+    message_log.append({"role": "user", "content": f"The following time-ordered history of the current emergency meeting conversation: '{history}'. Note that the '|' symbol separates individual players responses. Also note that text before the ':' symbol indicates who spoke, and the text after the ':' symbol indicates what was said by the person. Also, the phrase 'PASS' indicates that a player did not speak for their turn. What is the next text that is said by your player?"})
 
     # Add a message from the chatbot to the conversation history
     message_log.append(
@@ -35,7 +38,7 @@ def get_response(user_input, character, accuser, room, is_imposter):
         # The stopping sequence for the generated response, if any (not used here)
         stop=None,
         # The "creativity" of the generated response (higher temperature = more creative)
-        temperature=0.9,
+        temperature=1,
     )
 
     # Find the first response from the chatbot that has text in it (some responses may not have text)
@@ -45,14 +48,15 @@ def get_response(user_input, character, accuser, room, is_imposter):
 
     return response.choices[0].message.content
 
-def get_initial_message(character, room, is_imposter):
-    player_char = "an Imposter" if is_imposter else "not an Imposter"
+def get_initial_message(cur_player, is_imposter, room_seen, dead_player, defendant=None):
+    player_char = "the Imposter" if is_imposter else "not the Imposter"
+    suspect_script = f' and are suspicious of {defendant}' if defendant else ''
      
     message_log = [
-        {"role": "system", "content": f"You are a twitch streamer playing a casual game of 'Among Us' with your friends. Use Among Us slang very liberally. There are four characters in this game: Blue, Red, Green, Yellow. You are currently the player {character} and are {player_char}. The room that you are currently located in is {room}. You have just called a meeting. Respond to the given prompts the way that your player would respond."}
+        {"role": "system", "content": f"You are a twitch streamer playing a casual game of 'Among Us' with your friends. Use Among Us slang very liberally. There are four characters in this game: Blue, Red, Green, Yellow. You are currently the player {cur_player} and are {player_char}. The room that you are currently located in is {room_seen}. You have just called a meeting because you have found {dead_player} to be dead{suspect_script}. Respond to the given prompts the way that your player would respond."}
     ]
     
-    message_log.append({"role": "user", "content": "Explain to the other players why you have called a meeting."})
+    message_log.append({"role": "user", "content": "Explain to the other players why you have called a meeting. Put this response in quotation."})
 
     # Add a message from the chatbot to the conversation history
     message_log.append(
@@ -68,7 +72,7 @@ def get_initial_message(character, room, is_imposter):
         # The stopping sequence for the generated response, if any (not used here)
         stop=None,
         # The "creativity" of the generated response (higher temperature = more creative)
-        temperature=0.9,
+        temperature=1,
     )
 
     # Find the first response from the chatbot that has text in it (some responses may not have text)
@@ -86,21 +90,65 @@ def gen_convo_datapoints(n, data_dir='data'):
         for i in tqdm(range(n)):
             pass
         
+def generate_vote_script(who_to_vote_off, who_starts_vote):
+    ar = ["Red", "Yellow", "Green", "Blue"]
+    starting_point_index = ar.index(who_starts_vote)
+    ar = ar[starting_point_index:] + ar[:starting_point_index]
+    
+    ar_without_imposter = ar.copy()
+    ar_without_imposter.remove(who_to_vote_off)
+    
+    ret_text = ''
+    for person in ar:
+        if person == who_to_vote_off:
+            ret_text = ret_text + f'{person}:{ar_without_imposter[(random.randint(0, 2))]}|'
+        else:
+            ret_text = ret_text + f'{person}:{who_to_vote_off}|'
+        
+    return ret_text[:-1]
 
+def run_one_training_round(cur_imposter, starting_speaker, who_is_dead, remaining_players):
+    
+    room_possibilities = ['Upper Engine', 'MedBay', 'Reactor', 'Security', 
+                          'Electrical', 'Lower Engine', 'Storage', 'Admin',
+                          'O2', 'Shields', 'Navigation', 'Weapons', 
+                          'Cafeteria', 'Communications', 'Cargo Bay', 'Cockpit']
+    
+    speaker_in_same_room = bool(random.randint(0,1))
+    
+    remaining_players_minus_imposter = remaining_players.copy()
+    remaining_players_minus_imposter.remove(cur_imposter)
+    
+    starting_point_index = remaining_players.index(starting_speaker)
+    impostor_index = remaining_players.index(cur_imposter)
+    
+    remaining_players = remaining_players[starting_point_index:] + remaining_players[:starting_point_index]
+    
+    room_list = [room_possibilities[random.randint(0, len(room_possibilities) - 1)] for _ in remaining_players]
+    
+    if speaker_in_same_room:
+        room_list[starting_point_index] = room_list[impostor_index]
+        defendant = cur_imposter
+    else:
+        defendant = None
+        
+    history = ''
+    initial_response = get_initial_message(starting_speaker, False, room_list[remaining_players.index(cur_imposter)], who_is_dead, defendant)[1:-1]
+    history = history + initial_response
+    
+    for i, player in enumerate((3 * remaining_players)[1:]):
+        new_response = get_response(history, player, room_list[i % len(room_list)], ((i%len(room_list)) == impostor_index))
+        print(new_response)
+    
+    return initial_response
 
 # Main function that runs the chatbot
 def main():
-    is_imposter = True
-    room_name = "Communications"
-    
-    # print(get_initial_message('Yellow', room_name, is_imposter))
-    gen_convo_datapoints(1000)
-    
-    # Save response information alongside character type and prompted question:
-    
-    
-
-
+    cur_imposter = 'Green'
+    starting_speaker = 'Yellow'
+    who_is_dead = 'Red'
+    remaining_players = ['Yellow', 'Green', 'Blue']
+    print(run_one_training_round(cur_imposter, starting_speaker, who_is_dead, remaining_players))
 # Call the main function if this file is executed directly (not imported as a module)
 if __name__ == "__main__":
     main()
