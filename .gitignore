@@ -1,3 +1,2 @@
-
 # Authentication Tokens For Scraping
-env.sh
+create-text-dataset/.env
