@@ -22,7 +22,7 @@ def get_response(history, character, room, is_imposter):
         {"role": "system", "content": f"You are a twitch streamer playing a casual game of 'Among Us' with your friends. Use Among Us slang very liberally. There are four characters in this game: Blue, Red, Green, Yellow. You are currently the player {character} and are {player_char}. The room that you are currently located in is {room}. Respond to the given prompts the way that your player would respond."}
     ]
     
-    message_log.append({"role": "user", "content": f"The following time-ordered history of the current emergency meeting conversation: '{history}'. Note that the '|' symbol separates individual players responses. Also note that text before the ':' symbol indicates who spoke, and the text after the ':' symbol indicates what was said by the person. Also, the phrase 'PASS' indicates that a player did not speak for their turn. What is the next text that is said by your player?"})
+    message_log.append({"role": "user", "content": f"The following tab-delineated history of the current emergency meeting conversation: '{history}'. What is your response to the given conversation? Put your response in quotes."})
 
     # Add a message from the chatbot to the conversation history
     message_log.append(
@@ -34,7 +34,7 @@ def get_response(history, character, room, is_imposter):
         # The conversation history up to this point, as a list of dictionaries
         messages=message_log,
         # The maximum number of tokens (words or subwords) in the generated response
-        max_tokens=3800,
+        max_tokens=1000,
         # The stopping sequence for the generated response, if any (not used here)
         stop=None,
         # The "creativity" of the generated response (higher temperature = more creative)
@@ -49,7 +49,7 @@ def get_response(history, character, room, is_imposter):
     return response.choices[0].message.content
 
 def get_initial_message(cur_player, is_imposter, room_seen, dead_player, defendant=None):
-    player_char = "the Imposter" if is_imposter else "not the Imposter"
+    player_char = "the Imposter, and do not want anyone to know" if is_imposter else "not the Imposter"
     suspect_script = f' and are suspicious of {defendant}' if defendant else ''
      
     message_log = [
@@ -68,7 +68,7 @@ def get_initial_message(cur_player, is_imposter, room_seen, dead_player, defenda
         # The conversation history up to this point, as a list of dictionaries
         messages=message_log,
         # The maximum number of tokens (words or subwords) in the generated response
-        max_tokens=3800,
+        max_tokens=1000,
         # The stopping sequence for the generated response, if any (not used here)
         stop=None,
         # The "creativity" of the generated response (higher temperature = more creative)
@@ -81,14 +81,6 @@ def get_initial_message(cur_player, is_imposter, room_seen, dead_player, defenda
             return choice.text
 
     return response.choices[0].message.content
-
-def gen_convo_datapoints(n, data_dir='data'):
-    if not isdir(data_dir):
-        mkdir(data_dir)
-        
-    with open(join(data_dir, 'gen'), 'w') as file:
-        for i in tqdm(range(n)):
-            pass
         
 def generate_vote_script(who_to_vote_off, who_starts_vote):
     ar = ["Red", "Yellow", "Green", "Blue"]
@@ -132,15 +124,29 @@ def run_one_training_round(cur_imposter, starting_speaker, who_is_dead, remainin
     else:
         defendant = None
         
-    history = ''
-    initial_response = get_initial_message(starting_speaker, False, room_list[remaining_players.index(cur_imposter)], who_is_dead, defendant)[1:-1]
-    history = history + initial_response
+    initial_response = get_initial_message(starting_speaker, False, room_list[remaining_players.index(cur_imposter)], who_is_dead, defendant)
+    history = [(starting_speaker, initial_response)]
+    
+    ret_history = f'{starting_speaker}:{initial_response}'
     
     for i, player in enumerate((3 * remaining_players)[1:]):
-        new_response = get_response(history, player, room_list[i % len(room_list)], ((i%len(room_list)) == impostor_index))
-        print(new_response)
+        new_response = get_response('\t'.join(list(map(lambda x : f'{x[0]}:{x[1]}', history))), player, room_list[i % len(room_list)], ((i%len(room_list)) == impostor_index))
+        ret_history = ret_history + f'\t{player}:{new_response}'
+        
+        if len(history) < 4:
+            history.append((player, new_response))
+        else:
+            history = history[1:] + [(player, new_response)]
     
-    return initial_response
+    return ret_history
+
+# def gen_convo_datapoints(n, data_dir='data'):
+#     if not isdir(data_dir):
+#         mkdir(data_dir)
+        
+#     with open(join(data_dir, 'gen'), 'w') as file:
+#         for i in tqdm(range(n)):
+            
 
 # Main function that runs the chatbot
 def main():
@@ -148,7 +154,12 @@ def main():
     starting_speaker = 'Yellow'
     who_is_dead = 'Red'
     remaining_players = ['Yellow', 'Green', 'Blue']
-    print(run_one_training_round(cur_imposter, starting_speaker, who_is_dead, remaining_players))
+    ret_str = run_one_training_round(cur_imposter, starting_speaker, who_is_dead, remaining_players)
+    
+    for x in ret_str.split('\t'):
+        print(x, '\n')
+    
+    
 # Call the main function if this file is executed directly (not imported as a module)
 if __name__ == "__main__":
     main()
