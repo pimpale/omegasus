@@ -5,6 +5,7 @@ from tqdm import tqdm
 import random
 
 import openai
+import csv
 
 # RED, YELLOW, GREEN, BLUE
 
@@ -99,6 +100,8 @@ def generate_vote_script(who_to_vote_off, who_starts_vote):
         
     return ret_text[:-1]
 
+
+
 def run_one_training_round(cur_imposter, starting_speaker, who_is_dead, remaining_players):
     
     room_possibilities = ['Upper Engine', 'MedBay', 'Reactor', 'Security', 
@@ -108,12 +111,15 @@ def run_one_training_round(cur_imposter, starting_speaker, who_is_dead, remainin
     
     speaker_in_same_room = bool(random.randint(0,1))
     
+    # Compute 
     remaining_players_minus_imposter = remaining_players.copy()
     remaining_players_minus_imposter.remove(cur_imposter)
     
+    #
     starting_point_index = remaining_players.index(starting_speaker)
     impostor_index = remaining_players.index(cur_imposter)
     
+    # 
     remaining_players = remaining_players[starting_point_index:] + remaining_players[:starting_point_index]
     
     room_list = [room_possibilities[random.randint(0, len(room_possibilities) - 1)] for _ in remaining_players]
@@ -150,15 +156,58 @@ def run_one_training_round(cur_imposter, starting_speaker, who_is_dead, remainin
 
 # Main function that runs the chatbot
 def main():
-    cur_imposter = 'Green'
-    starting_speaker = 'Yellow'
-    who_is_dead = 'Red'
-    remaining_players = ['Yellow', 'Green', 'Blue']
-    ret_str = run_one_training_round(cur_imposter, starting_speaker, who_is_dead, remaining_players)
+
+    # Define the set of total players
+
+    available_players = ['Red', 'Green', 'Yellow', 'Blue']
+
+    # Randomly sample without replacement from the available players
+
+    # Assign a player to be the dead player initiating the conversation
+    who_is_dead = random.choice(available_players)
+    available_players.remove(who_is_dead)
+
+    # Assign a character to be an imposter(one max imposter per game)
+    cur_imposter = random.choice(available_players)
+    available_players.remove(cur_imposter)
+
+    # Assign a player to begin conversation in chat
+    starting_speaker = random.choice(available_players)
+    available_players.remove(starting_speaker)
+
+
+    available_players.append(cur_imposter)
+    available_players.append(starting_speaker)
+
+    living_players = available_players
+
+    ret_str = run_one_training_round(cur_imposter, starting_speaker, who_is_dead, living_players)
     
-    for x in ret_str.split('\t'):
-        print(x, '\n')
+    player_responding = []
+    player_response = []
+
     
+
+
+    row_list = [[]]
+
+    for response in ret_str.split('\t'):
+        player_responding.append(response[:response.index(':')])
+        player_response.append(response[response.index(':') + 1:])
+        row = [player_responding, player_response]
+        row_list.append(row)
+
+    #print(player_responding)
+    #print(player_response) 
+
+    for i in row_list:
+        print(i)
+
+    with open(f'amongusdata{convo_number}.csv', 'w', newline='') as file:
+        file.write('sep=\t' + '\n')
+        for player, response in zip(player_responding, player_response):
+            file.write(player + '\t' + response + '\n')
+
     
 # Call the main function if this file is executed directly (not imported as a module)
 if __name__ == "__main__":
