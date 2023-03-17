@@ -47,7 +47,7 @@ class ActorPlayer(Player):
         p = raw_p/np.sum(raw_p)
 
         chosen_action = env.Action(np.random.choice(len(p), p=p))
-        reward = e.step(chosen_action, player)
+        reward = e.play(chosen_action, player)
 
         return (
             obs,
@@ -70,7 +70,7 @@ class RandomPlayer(Player):
         action_prob = scipy.special.softmax(
             np.random.random(size=len(legal_mask)))
         chosen_action: env.Action = np.argmax(action_prob*legal_mask)
-        reward = e.step(chosen_action, player)
+        reward = e.play(chosen_action, player)
 
         return (
             obs,
@@ -91,7 +91,7 @@ class WaitPlayer(Player):
         obs = e.observe(player)
 
         chosen_action = env.Actions.WAIT
-        reward = e.step(chosen_action, player)
+        reward = e.play(chosen_action, player)
         action_prob = np.zeros(env.ACTION_SPACE_SIZE)
 
         return (

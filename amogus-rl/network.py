@@ -215,8 +215,6 @@ def train_ppo(
     critic_loss.backward()
     critic_optimizer.step()
 
-
-
     # return the respective losses
     return (float(actor_loss), float(critic_loss))
 

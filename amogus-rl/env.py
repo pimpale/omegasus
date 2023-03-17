@@ -129,8 +129,7 @@ class Env():
 
         return mask.astype(np.bool8)
 
-    def step(self, action: Action, player: Player) -> Reward:
-        self.steps += 1
+    def play(self, action: Action, player: Player) -> Reward:
         # assert player is live
         assert not self.state.players[player].dead
 
@@ -175,3 +174,6 @@ class Env():
                 reward += 1
 
         return Reward(reward)
+    
+    def step(self)-> None:
+        self.steps += 1
