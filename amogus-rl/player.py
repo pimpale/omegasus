@@ -12,7 +12,7 @@ class Player(ABC):
         super().__init__()
 
     @abstractmethod
-    def play(self, player: env.Player, e: env.Env) -> tuple[env.Observation, np.ndarray, env.Action, env.Reward]:
+    def play(self, e: env.Env) -> tuple[env.Observation, np.ndarray, env.Action]:
         pass
 
     @abstractmethod
@@ -26,7 +26,7 @@ class ActorPlayer(Player):
         self.critic = critic
         self.epoch = epoch
 
-    def play(self, player: env.Player, e: env.Env) -> tuple[env.Observation, np.ndarray, env.Action, env.Reward]:
+    def play(self, player: env.Player, e: env.Env) -> tuple[env.Observation, np.ndarray, env.Action]:
         obs = e.observe(player)
 
         device = network.deviceof(self.actor)
@@ -47,13 +47,11 @@ class ActorPlayer(Player):
         p = raw_p/np.sum(raw_p)
 
         chosen_action = env.Action(np.random.choice(len(p), p=p))
-        reward = e.play(chosen_action, player)
 
         return (
             obs,
             action_probs,
             chosen_action,
-            reward
         )
 
     def name(self) -> str:
@@ -64,19 +62,17 @@ class RandomPlayer(Player):
     def __init__(self) -> None:
         pass
 
-    def play(self, player: env.Player, e: env.Env) -> tuple[env.Observation, np.ndarray, env.Action, env.Reward]:
+    def play(self, player: env.Player, e: env.Env) -> tuple[env.Observation, np.ndarray, env.Action]:
         obs = e.observe(player)
         legal_mask = e.legal_mask(player)
         action_prob = scipy.special.softmax(
             np.random.random(size=len(legal_mask)))
         chosen_action: env.Action = np.argmax(action_prob*legal_mask)
-        reward = e.play(chosen_action, player)
 
         return (
             obs,
             action_prob,
             chosen_action,
-            reward
         )
 
     def name(self) -> str:
@@ -87,18 +83,16 @@ class WaitPlayer(Player):
     def __init__(self) -> None:
         pass
 
-    def play(self, player: env.Player, e: env.Env) -> tuple[env.Observation, np.ndarray, env.Action, env.Reward]:
+    def play(self, player: env.Player, e: env.Env) -> tuple[env.Observation, np.ndarray, env.Action]:
         obs = e.observe(player)
 
         chosen_action = env.Actions.WAIT
-        reward = e.play(chosen_action, player)
         action_prob = np.zeros(env.ACTION_SPACE_SIZE)
 
         return (
             obs,
             action_prob,
             chosen_action,
-            reward
         )
 
     def name(self) -> str:

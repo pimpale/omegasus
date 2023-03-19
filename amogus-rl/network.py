@@ -11,34 +11,14 @@ BOARD_CONV_FILTERS = 4
 
 ACTOR_LR = 1e-4  # Lower lr stabilises training greatly
 CRITIC_LR = 1e-5  # Lower lr stabilises training greatly
-GAMMA = 0.99
+GAMMA = 0.90
 PPO_EPS = 0.2
-
+PPO_EPOCHS = 10
 
 # Converts an observation into a numpy array with dims (Channel, Width, Height)
 def reshape_board(obs: env.Observation) -> np.ndarray:  
-    channels = [] 
-
-    for i in range(NUM_CHANNELS): # number of channels 
-        channel_i = np.zeros((BOARD_XSIZE, BOARD_YSIZE))
-        if i == 0:     # player channel 
-            player_locations = [p.location for p in obs.players]
-            rows, cols = zip(*player_locations)
-            channel_i[rows, cols] = 1
-        elif i == 1:   # imposter channel 
-            imposter_locations = [p.location for p in obs.players if p.impostor]
-            rows, cols = zip(*imposter_locations)
-            channel_i[rows, cols] = 1
-        elif i == 2:   # task channel 
-            rows, cols = zip(*obs.task_locations)
-            channel_i[rows, cols] = 1 
-        elif i == 3:   # self channel 
-            channel_i[obs.players[obs.self_id].location] = 1
-        channels.append(channel_i) 
-
-    return np.stack(channels) 
-
-
+    channels = [obs.player_channel, obs.impostor_channel, obs.task_channel, obs.self_channel]
+    return np.stack(channels).astype(np.float32)
 
 # output in (Batch, Channel, Width, Height)
 def obs_batch_to_tensor(o_batch: list[env.Observation], device: torch.device) -> torch.Tensor:
@@ -61,9 +41,9 @@ class Critic(nn.Module):
 
 
         self.conv1 = nn.Conv2d(
-            in_channels=5, out_channels=BOARD_CONV_FILTERS, kernel_size=2, padding='same')
-        self.fc1 = nn.Linear(BOARD_XSIZE*BOARD_YSIZE*BOARD_CONV_FILTERS, 20)
-        self.fc2 = nn.Linear(20, 1)
+            in_channels=NUM_CHANNELS, out_channels=BOARD_CONV_FILTERS, kernel_size=3, padding='same')
+        self.fc1 = nn.Linear(BOARD_XSIZE*BOARD_YSIZE*BOARD_CONV_FILTERS, 512)
+        self.fc2 = nn.Linear(512, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # cast to float32
@@ -91,9 +71,9 @@ class Actor(nn.Module):
         self.action_size = ACTION_SPACE_SIZE
 
         self.conv1 = nn.Conv2d(
-            in_channels=5, out_channels=BOARD_CONV_FILTERS, kernel_size=2, padding='same')
-        self.fc1 = nn.Linear(BOARD_XSIZE*BOARD_YSIZE*BOARD_CONV_FILTERS, 20)
-        self.fc2 = nn.Linear(20, ACTION_SPACE_SIZE)
+            in_channels=NUM_CHANNELS, out_channels=BOARD_CONV_FILTERS, kernel_size=3, padding='same')
+        self.fc1 = nn.Linear(BOARD_XSIZE*BOARD_YSIZE*BOARD_CONV_FILTERS, 512)
+        self.fc2 = nn.Linear(512, ACTION_SPACE_SIZE)
 
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -166,7 +146,7 @@ def train_ppo(
     oldpolicy_batch: list[np.ndarray],
     advantage_batch: list[env.Advantage],
     value_batch: list[env.Value],
-) -> tuple[float, float]:
+) -> tuple[list[float], list[float]]:
     # assert that the models are on the same device
     assert next(critic.parameters()).device == next(actor.parameters()).device
     # assert that the batch_lengths are the same
@@ -200,13 +180,15 @@ def train_ppo(
 
 
     # train actor
-    actor_optimizer.zero_grad()
-    current_policy_action_probs = actor.forward(observation_batch_tensor)
-    actor_loss = compute_ppo_loss(old_policy_action_probs_batch_tensor,
-                                  current_policy_action_probs, chosen_action_tensor, advantage_batch_tensor)
-    actor_loss.backward()
-    actor_optimizer.step()
-
+    actor_losses:list[float] = []
+    for _ in range(PPO_EPOCHS):
+        actor_optimizer.zero_grad()
+        current_policy_action_probs = actor.forward(observation_batch_tensor)
+        actor_loss = compute_ppo_loss(old_policy_action_probs_batch_tensor,
+                                      current_policy_action_probs, chosen_action_tensor, advantage_batch_tensor)
+        actor_loss.backward()
+        actor_optimizer.step()
+        actor_losses.append(actor_loss.item())
 
     # train critic
     critic_optimizer.zero_grad()
@@ -216,7 +198,7 @@ def train_ppo(
     critic_optimizer.step()
 
     # return the respective losses
-    return (float(actor_loss), float(critic_loss))
+    return (actor_losses, [float(critic_loss)]*PPO_EPOCHS)
 
 
 # computes advantage using Generalized Advantage Estimation 
