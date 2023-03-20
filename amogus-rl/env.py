@@ -7,6 +7,7 @@ BOARD_XSIZE = 5
 BOARD_YSIZE = 5
 ACTION_SPACE_SIZE = 5  # U, D, L, R, W
 NUM_CHANNELS = 4  # players, imposters, tasks, self
+MAX_STEPS = 50
 
 # integer [0, 1, 2, 3, 4] <=> [U, D, L, R, W]
 Action: TypeAlias = np.int8
@@ -152,7 +153,7 @@ class Env():
         )
     
     def game_over(self) -> bool:
-        return self.steps >= 100
+        return self.steps >= MAX_STEPS
 
     def game_over_for(self, player: Player) -> bool:
         return self.state.players[player].dead or self.game_over()
