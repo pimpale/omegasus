@@ -10,14 +10,14 @@ from env import ACTION_SPACE_SIZE, BOARD_XSIZE, BOARD_YSIZE, NUM_CHANNELS
 BOARD_CONV_FILTERS = 10
 
 ACTOR_LR = 1e-4  # Lower lr stabilises training greatly
-CRITIC_LR = 1e-4  # Lower lr stabilises training greatly
-GAMMA = 0.90
-PPO_EPS = 0.2
-PPO_EPOCHS = 10
+CRITIC_LR = 5e-4  # Lower lr stabilises training greatly
+GAMMA = 0.80
+PPO_EPS = 0.1
+PPO_EPOCHS = 20
 
 # Converts an observation into a numpy array with dims (Channel, Width, Height)
 def reshape_board(obs: env.Observation) -> np.ndarray:  
-    channels = [obs.player_channel, obs.impostor_channel, obs.task_channel, obs.self_channel]
+    channels = [obs.crewmate_channel, obs.impostor_channel, obs.task_channel, obs.self_channel]
     return np.stack(channels).astype(np.float32)
 
 # output in (Batch, Channel, Width, Height)
@@ -129,7 +129,7 @@ def compute_ppo_loss(
     entropy_at_t = -torch.sum(torch.log(pi_theta_given_st)
                               * pi_theta_given_st, 1)
 
-    total_loss_at_t = -ppo2loss_at_t - 0.1*entropy_at_t
+    total_loss_at_t = -ppo2loss_at_t - 0.25*entropy_at_t
 
     # we take the average loss over all examples
     return total_loss_at_t.mean()

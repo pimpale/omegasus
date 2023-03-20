@@ -7,7 +7,7 @@ BOARD_XSIZE = 5
 BOARD_YSIZE = 5
 ACTION_SPACE_SIZE = 5  # U, D, L, R, W
 NUM_CHANNELS = 4  # players, imposters, tasks, self
-MAX_STEPS = 50
+MAX_STEPS = 25
 
 # integer [0, 1, 2, 3, 4] <=> [U, D, L, R, W]
 Action: TypeAlias = np.int8
@@ -45,7 +45,7 @@ class PlayerState:
 class State:
     """Overall state of the game"""
     players: list[PlayerState]
-    tasks: np.ndarray[Any, np.dtype[np.bool8]]
+    tasks: np.ndarray[Any, np.dtype[np.int8]]
 
 
 @dataclass
@@ -56,6 +56,7 @@ class Observation:  # note, not differentiating between player and impostor
     task_channel: np.ndarray[Any, np.dtype[np.bool8]]
     self_channel: np.ndarray[Any, np.dtype[np.int8]]
     impostor_channel: np.ndarray[Any, np.dtype[np.int8]]
+    crewmate_channel: np.ndarray[Any, np.dtype[np.int8]]
     dead_channel: np.ndarray[Any, np.dtype[np.int8]]
 
 def print_action(action: Action):
@@ -85,52 +86,32 @@ def print_obs(obs: Observation):
                     c = '😈'
                 else:
                     c = '👽'
-            elif obs.player_channel[y, x]:
+            elif obs.crewmate_channel[y, x]:
                 if obs.self_channel[y, x]:
                     c = '😇'
                 else:
                     c = '🧑‍🚀'
     
-            if obs.task_channel[y, x]:
+            if obs.task_channel[y, x] > 0:
                 if c == '⬛':
                     c = '📦'
             q += c
         print(q)
 
-
-def initial_state() -> State:
-    task_locations = np.zeros((BOARD_XSIZE, BOARD_YSIZE), dtype=np.bool8)
-    task_locations[2, 2] = True
-    return State(
-        # Players
-        [
-            # Impostor at (1, 1)
-            PlayerState((1, 1), True, False),
-            # Crewmate at (3, 3)
-            PlayerState((3, 3), False, False)
-        ],
-        # Tasks
-        task_locations,
-    )
-
-
 class Env():
-    def __init__(self):
+    def __init__(self, initial_state: State):
         self.steps = 0
-        self.state: State = initial_state()
-
-    def reset(self) -> None:
-        self._game_over = False
-        self.state = initial_state()
+        self.state: State = initial_state
 
     def observe(self, player: Player) -> Observation:
         """Observation by a single player of the game"""
         self_is_impostor = self.state.players[player].impostor
         player_channel = np.zeros((BOARD_XSIZE, BOARD_YSIZE), dtype=np.int8)
         impostor_channel = np.zeros((BOARD_XSIZE, BOARD_YSIZE), dtype=np.int8)
+        crewmate_channel = np.zeros((BOARD_XSIZE, BOARD_YSIZE), dtype=np.int8)
         self_channel = np.zeros((BOARD_XSIZE, BOARD_YSIZE), dtype=np.int8)
         dead_channel = np.zeros((BOARD_XSIZE, BOARD_YSIZE), dtype=np.int8)
-        task_channel = self.state.tasks
+        task_channel = self.state.tasks > 0
 
         for ip, p in enumerate(self.state.players):
             x, y = p.location
@@ -142,6 +123,8 @@ class Env():
                 player_channel[y, x] = 1
                 if p.impostor:
                     impostor_channel[y, x] = 1
+                else:
+                    crewmate_channel[y, x] = 1
 
         return Observation(
             self_is_impostor,
@@ -149,6 +132,7 @@ class Env():
             task_channel,
             self_channel,
             impostor_channel,
+            crewmate_channel,
             dead_channel,
         )
     
@@ -232,9 +216,14 @@ class Env():
         for i, p in enumerate(self.state.players):
             if (not p.impostor) and (not p.dead):
                 x, y = p.location
-                rewards[i] += self.state.tasks[y, x]
+                # award 0.5 for each task in the same location
+                # remove one of the tasks in the same location
+                if self.state.tasks[y, x] > 0:
+                    rewards[i] += 0.5
+                    self.state.tasks[y, x] -= 1
+
                 if impostor_locs[y, x] > 0:
-                    rewards[i] -= 1
+                    rewards[i] -= 0.5
                     self.state.players[i].dead = True
 
         self.steps += 1
