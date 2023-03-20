@@ -1,3 +1,5 @@
+# NOTE: Code for training and generation inpired by "Lyrics Generation with GPT-2" by François St-Amant (https://github.com/francoisstamant/lyrics-generation-with-GPT2)
+
 import pandas as pd
 import numpy as np
 import sklearn
@@ -163,6 +165,18 @@ def generate(
                 
     return generated_list
 
+# def generate_conversation(model, tokenizer, starting_speaker, imposter, who_is_dead, num_rounds = 3):
+#     remaining_players = ['Red', 'Green', 'Yellow', 'Blue']
+#     remaining_players.remove(who_is_dead)
+#     remaining_players.remove(starting_speaker)
+#     remaining_players = [starting_speaker] + remaining_players
+#     current_convo = ''
+#     for _ in range(num_rounds):
+#         for player in remaining_players:
+#             current_convo = current_convo + player + '\t' + ('imposter' if player == imposter else 'crewmate') + '\t'
+#             current_convo = generate(model, tokenizer, current_convo, entry_length=200)[0]
+#     return current_convo
+
 def generate_conversation(model, tokenizer, starting_speaker, imposter, who_is_dead, num_rounds = 3):
     remaining_players = ['Red', 'Green', 'Yellow', 'Blue']
     remaining_players.remove(who_is_dead)
@@ -171,20 +185,8 @@ def generate_conversation(model, tokenizer, starting_speaker, imposter, who_is_d
     current_convo = ''
     for _ in range(num_rounds):
         for player in remaining_players:
-            current_convo = current_convo + player + '\t' + ('imposter' if player == imposter else 'crewmate') + '\t'
-            current_convo = generate(model, tokenizer, current_convo, entry_length=200)[0]
-    return current_convo
-
-def generate_conversation_base_model(model, tokenizer, starting_speaker, imposter, who_is_dead, num_rounds = 3):
-    remaining_players = ['Red', 'Green', 'Yellow', 'Blue']
-    remaining_players.remove(who_is_dead)
-    remaining_players.remove(starting_speaker)
-    remaining_players = [starting_speaker] + remaining_players
-    current_convo = ''
-    for _ in range(num_rounds):
-        for player in remaining_players:
             player_tag = ('imposter' if player == imposter else 'crewmate')
-            response = (player + ' says "' + generate(model, tokenizer, player + ' says "', entry_length=200, temperature=0.9)[0]).split('"')[2]
+            response = (player + ' says "' + generate(model, tokenizer, 'A dead body was just found in Communications. All the players have gathered for a meeting. ' + player + ' says "', entry_length=200, temperature=0.7)[0]).split('"')[2]
             current_convo = current_convo + f'{player}\t{player_tag}\t{response}\n'
             
     return current_convo
