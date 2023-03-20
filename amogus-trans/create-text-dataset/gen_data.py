@@ -1,11 +1,13 @@
 
-from os import mkdir, environ
-from os.path import isdir, join
+from os import environ, path
 from tqdm import tqdm
 import random
 
 import openai
 import csv
+
+NUM_DATAPOINTS = 10
+DATA_DIR='data_dir'
 
 # RED, YELLOW, GREEN, BLUE
 
@@ -156,58 +158,46 @@ def run_one_training_round(cur_imposter, starting_speaker, who_is_dead, remainin
 
 # Main function that runs the chatbot
 def main():
-
-    # Define the set of total players
-
-    available_players = ['Red', 'Green', 'Yellow', 'Blue']
-
-    # Randomly sample without replacement from the available players
-
-    # Assign a player to be the dead player initiating the conversation
-    who_is_dead = random.choice(available_players)
-    available_players.remove(who_is_dead)
-
-    # Assign a character to be an imposter(one max imposter per game)
-    cur_imposter = random.choice(available_players)
-    available_players.remove(cur_imposter)
-
-    # Assign a player to begin conversation in chat
-    starting_speaker = random.choice(available_players)
-    available_players.remove(starting_speaker)
-
-
-    available_players.append(cur_imposter)
-    available_players.append(starting_speaker)
-
-    living_players = available_players
-
-    ret_str = run_one_training_round(cur_imposter, starting_speaker, who_is_dead, living_players)
     
-    player_responding = []
-    player_response = []
+    for convo_number in range(NUM_DATAPOINTS):
 
-    
+        # Define the set of total players
+
+        available_players = ['Red', 'Green', 'Yellow', 'Blue']
+
+        # Randomly sample without replacement from the available players
+
+        # Assign a player to be the dead player initiating the conversation
+        who_is_dead = random.choice(available_players)
+        available_players.remove(who_is_dead)
+
+        # Assign a character to be an imposter(one max imposter per game)
+        cur_imposter = random.choice(available_players)
+        available_players.remove(cur_imposter)
+
+        # Assign a player to begin conversation in chat
+        starting_speaker = random.choice(available_players)
+        available_players.remove(starting_speaker)
 
 
-    row_list = [[]]
+        available_players.append(cur_imposter)
+        available_players.append(starting_speaker)
 
-    for response in ret_str.split('\t'):
-        player_responding.append(response[:response.index(':')])
-        player_response.append(response[response.index(':') + 1:])
-        row = [player_responding, player_response]
-        row_list.append(row)
+        living_players = available_players
 
-    #print(player_responding)
-    #print(player_response) 
-
-    for i in row_list:
-        print(i)
-
-    with open(f'amongusdata{convo_number}.csv', 'w', newline='') as file:
-        file.write('sep=\t' + '\n')
-        for player, response in zip(player_responding, player_response):
-            file.write(player + '\t' + response + '\n')
-
+        ret_str = run_one_training_round(cur_imposter, starting_speaker, who_is_dead, living_players)
+        
+        player_responding = []
+        player_response = []
+        
+        if 'As an AI language model' not in ret_str:
+            for response in ret_str.split('\t'):
+                player_responding.append(response[:response.index(':')])
+                player_response.append(response[response.index(':') + 1:])
+            
+            with open(path.join(DATA_DIR, f'amongusdata{convo_number}.csv'), 'w', newline='') as file:
+                for player, response in zip(player_responding, player_response):
+                    file.write(player + '\t' + response + '\n')
     
 # Call the main function if this file is executed directly (not imported as a module)
 if __name__ == "__main__":
