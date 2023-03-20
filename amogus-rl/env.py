@@ -24,8 +24,6 @@ Advantage: TypeAlias = np.float32
 Player: TypeAlias = np.int8
 
 # Action IDs
-
-
 class Actions:
     MOVE_LEFT = Action(0)
     MOVE_RIGHT = Action(1)
@@ -52,6 +50,7 @@ class State:
 @dataclass
 class Observation:  # note, not differentiating between player and impostor
     """Observation by a single player of the game"""
+    self_is_impostor: bool
     player_channel: np.ndarray[Any, np.dtype[np.int8]]
     task_channel: np.ndarray[Any, np.dtype[np.bool8]]
     self_channel: np.ndarray[Any, np.dtype[np.int8]]
@@ -125,6 +124,7 @@ class Env():
 
     def observe(self, player: Player) -> Observation:
         """Observation by a single player of the game"""
+        self_is_impostor = self.state.players[player].impostor
         player_channel = np.zeros((BOARD_XSIZE, BOARD_YSIZE), dtype=np.int8)
         impostor_channel = np.zeros((BOARD_XSIZE, BOARD_YSIZE), dtype=np.int8)
         self_channel = np.zeros((BOARD_XSIZE, BOARD_YSIZE), dtype=np.int8)
@@ -143,6 +143,7 @@ class Env():
                     impostor_channel[y, x] = 1
 
         return Observation(
+            self_is_impostor,
             player_channel,
             task_channel,
             self_channel,
@@ -232,7 +233,7 @@ class Env():
                 x, y = p.location
                 rewards[i] += self.state.tasks[y, x]
                 if impostor_locs[y, x] > 0:
-                    rewards[i] -= 10
+                    rewards[i] -= 1
                     self.state.players[i].dead = True
 
         self.steps += 1

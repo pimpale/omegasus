@@ -21,25 +21,38 @@ class Player(ABC):
 
 
 class ActorPlayer(Player):
-    def __init__(self, actor: network.Actor, critic: network.Critic, epoch: int) -> None:
-        self.actor = actor
-        self.critic = critic
-        self.epoch = epoch
+    def __init__(
+            self,
+            impostor_actor: network.Actor,
+            impostor_critic: network.Critic,
+            impostor_step: int,
+            crewmate_actor: network.Actor,
+            crewmate_critic: network.Critic,
+            crewmate_step: int,
+        ) -> None:
+        self.impostor_actor = impostor_actor
+        self.impostor_critic = impostor_critic
+        self.impostor_step = impostor_step
+        self.crewmate_actor = crewmate_actor
+        self.crewmate_critic = crewmate_critic
+        self.crewmate_step = crewmate_step
 
-    def play(self, player: env.Player, e: env.Env) -> tuple[env.Observation, np.ndarray, env.Action]:
+    def play(self, player: env.Player, e: env.Env) -> tuple[env.Observation, np.ndarray, env.Action]:      
         obs = e.observe(player)
+        actor = self.impostor_actor if obs.self_is_impostor else self.crewmate_actor
 
-        device = network.deviceof(self.actor)
+        device = network.deviceof(actor)
 
-        action_probs = self.actor.forward(network.obs_to_tensor(obs, device))[
+        action_probs = actor.forward(network.obs_to_tensor(obs, device))[
             0].to("cpu").detach().numpy()
-
-        action_entropy = scipy.stats.entropy(action_probs)
-        if action_entropy < 0.001:
-            raise ValueError("Entropy is too low!")
 
         if np.isnan(action_probs).any():
             raise ValueError("NaN found!")
+
+        action_entropy = scipy.stats.entropy(action_probs)
+
+        if action_entropy < 0.001:
+            raise ValueError("Entropy is too low!")
 
         legal_mask = e.legal_mask(player)
 
@@ -55,7 +68,7 @@ class ActorPlayer(Player):
         )
 
     def name(self) -> str:
-        return f"actor_ckpt_{self.epoch}"
+        return f"nn_ckpt_crewmate{self.crewmate_step}_impostor{self.impostor_step}"
 
 
 class RandomPlayer(Player):

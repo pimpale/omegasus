@@ -7,10 +7,10 @@ import torch.nn.functional as F
 
 from env import ACTION_SPACE_SIZE, BOARD_XSIZE, BOARD_YSIZE, NUM_CHANNELS
 # Hyperparameters
-BOARD_CONV_FILTERS = 4
+BOARD_CONV_FILTERS = 10
 
 ACTOR_LR = 1e-4  # Lower lr stabilises training greatly
-CRITIC_LR = 1e-5  # Lower lr stabilises training greatly
+CRITIC_LR = 1e-4  # Lower lr stabilises training greatly
 GAMMA = 0.90
 PPO_EPS = 0.2
 PPO_EPOCHS = 10
@@ -39,11 +39,10 @@ class Critic(nn.Module):
     def __init__(self):
         super(Critic, self).__init__()
 
-
         self.conv1 = nn.Conv2d(
             in_channels=NUM_CHANNELS, out_channels=BOARD_CONV_FILTERS, kernel_size=3, padding='same')
-        self.fc1 = nn.Linear(BOARD_XSIZE*BOARD_YSIZE*BOARD_CONV_FILTERS, 512)
-        self.fc2 = nn.Linear(512, 1)
+        self.fc1 = nn.Linear(BOARD_XSIZE*BOARD_YSIZE*BOARD_CONV_FILTERS, 256)
+        self.fc2 = nn.Linear(256, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # cast to float32
@@ -72,8 +71,8 @@ class Actor(nn.Module):
 
         self.conv1 = nn.Conv2d(
             in_channels=NUM_CHANNELS, out_channels=BOARD_CONV_FILTERS, kernel_size=3, padding='same')
-        self.fc1 = nn.Linear(BOARD_XSIZE*BOARD_YSIZE*BOARD_CONV_FILTERS, 512)
-        self.fc2 = nn.Linear(512, ACTION_SPACE_SIZE)
+        self.fc1 = nn.Linear(BOARD_XSIZE*BOARD_YSIZE*BOARD_CONV_FILTERS, 256)
+        self.fc2 = nn.Linear(256, ACTION_SPACE_SIZE)
 
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -229,8 +228,6 @@ def compute_advantage(
     return list(trajectory_advantages)
 
 # computes what the critic network should have predicted
-
-
 # return over trajectory at each time step 
 def compute_value(
     trajectory_rewards: list[env.Reward],
