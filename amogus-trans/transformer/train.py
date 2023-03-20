@@ -18,8 +18,8 @@ def main():
     
     model = train(train_dataset, 
                   model, 
-                  batch_size=2, 
-                  epochs=20,
+                  batch_size=1,
+                  epochs=20, 
                   lr=2e-5,
                   output_dir=MODEL_DIR,
                   output_prefix=SAVED_MODEL_PREFIX,
@@ -32,9 +32,4 @@ def main():
     # generated_message = generate(model, tokenizer, "Red\tcrewmate\t", entry_count=10, entry_length=100)
 
 if __name__ == '__main__':
-    # main()
-    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-    model = GPT2LMHeadModel.from_pretrained('gpt2')
-    model.load_state_dict(torch.load('model_dir/bigboi-best-2.pt'))
-    
-    print(generate_conversation(model, tokenizer, 'Red', 'Green', 'Blue'))
+    main()
