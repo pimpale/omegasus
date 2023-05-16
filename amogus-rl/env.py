@@ -1,28 +1,35 @@
 import numpy as np
+import pettingzoo
+from pettingzoo.utils.env import AgentID
+from gym import spaces
 from dataclasses import dataclass
-from typing import Any, TypeAlias, Literal
-import copy
+from typing import Any, Optional, TypeAlias, Literal
+import functools
 
-BOARD_XSIZE = 5
-BOARD_YSIZE = 5
+# size of game board
+BOARD_XSIZE = 10
+BOARD_YSIZE = 10
+
+# size of the action space
 ACTION_SPACE_SIZE = 5  # U, D, L, R, W
-NUM_CHANNELS = 4  # players, imposters, tasks, self
-MAX_STEPS = 25
+
+# size of the observation (player is located at the center)
+OBS_XSIZE = 11
+OBS_YSIZE = 11
+# impostors, crewmates, dead, tasks, wall
+OBS_NUM_CHANNELS = 5
+
+# Channel IDs
+IMPOSTOR_CHANNEL = 0
+CREWMATE_CHANNEL = 1
+DEAD_CHANNEL = 2
+TASK_CHANNEL = 3
+WALL_CHANNEL = 4
+
 
 # integer [0, 1, 2, 3, 4] <=> [U, D, L, R, W]
 Action: TypeAlias = np.int8
 
-# Reward for the agent
-Reward: TypeAlias = np.float32
-
-# Value of an observation for an agent
-Value: TypeAlias = np.float32
-
-# Advantage of a particular action for an agent
-Advantage: TypeAlias = np.float32
-
-# The identity of the player
-Player: TypeAlias = np.int8
 
 # Action IDs
 class Actions:
@@ -36,28 +43,22 @@ class Actions:
 @dataclass
 class PlayerState:
     """State of a single player"""
+
     location: tuple[int, int]
     impostor: bool
-    dead: bool
+
+
+Observation: TypeAlias = np.ndarray[int, np.dtype[np.bool_]]
 
 
 @dataclass
 class State:
     """Overall state of the game"""
-    players: list[PlayerState]
+
+    players: dict[AgentID, PlayerState]
+    dead: np.ndarray[Any, np.dtype[np.int8]]
     tasks: np.ndarray[Any, np.dtype[np.int8]]
 
-
-@dataclass
-class Observation:  # note, not differentiating between player and impostor
-    """Observation by a single player of the game"""
-    self_is_impostor: bool
-    player_channel: np.ndarray[Any, np.dtype[np.int8]]
-    task_channel: np.ndarray[Any, np.dtype[np.bool8]]
-    self_channel: np.ndarray[Any, np.dtype[np.int8]]
-    impostor_channel: np.ndarray[Any, np.dtype[np.int8]]
-    crewmate_channel: np.ndarray[Any, np.dtype[np.int8]]
-    dead_channel: np.ndarray[Any, np.dtype[np.int8]]
 
 def print_action(action: Action):
     if action == Actions.MOVE_LEFT:
@@ -73,78 +74,84 @@ def print_action(action: Action):
     else:
         print("Unknown Action")
 
-def print_obs(obs: Observation):
-    for y in range(BOARD_YSIZE):
-        q = ''
-        for x in range(BOARD_XSIZE):
-            c = '⬛'
 
-            if obs.dead_channel[y, x]:
-                c = '💀'
-            elif obs.impostor_channel[y, x]:
-                if obs.self_channel[y, x]:
-                    c = '😈'
-                else:
-                    c = '👽'
-            elif obs.crewmate_channel[y, x]:
-                if obs.self_channel[y, x]:
-                    c = '😇'
-                else:
-                    c = '🧑‍🚀'
-    
-            if obs.task_channel[y, x] > 0:
-                if c == '⬛':
-                    c = '📦'
+def print_obs(obs: np.ndarray):
+    for y in range(OBS_YSIZE):
+        q = ""
+        for x in range(OBS_XSIZE):
+            c = "⬛"
+            if obs[DEAD_CHANNEL, y, x]:
+                c = "💀"
+            elif obs[IMPOSTOR_CHANNEL, y, x]:
+                c = "👽"
+            elif obs[CREWMATE_CHANNEL, y, x]:
+                c = "🧑‍🚀"
+            elif obs[WALL_CHANNEL, y, x]:
+                c = "🧱"
+            elif obs[TASK_CHANNEL, y, x]:
+                c = "📦"
             q += c
         print(q)
 
-class Env():
-    def __init__(self, initial_state: State):
-        self.steps = 0
+
+class AmogusEnv(pettingzoo.ParallelEnv):
+    metadata = {"render_modes": ["human"], "name": "amogus_env"}
+
+    def __init__(self, initial_state: State, render_mode=None):
+        self.initial_state: State = initial_state
         self.state: State = initial_state
+        self.agents = list(self.state.players.keys())
+        self.possible_agents = list(self.state.players.keys())
 
-    def observe(self, player: Player) -> Observation:
+    def observe(self, agent: AgentID) -> Observation:
         """Observation by a single player of the game"""
-        self_is_impostor = self.state.players[player].impostor
-        player_channel = np.zeros((BOARD_XSIZE, BOARD_YSIZE), dtype=np.int8)
-        impostor_channel = np.zeros((BOARD_XSIZE, BOARD_YSIZE), dtype=np.int8)
-        crewmate_channel = np.zeros((BOARD_XSIZE, BOARD_YSIZE), dtype=np.int8)
-        self_channel = np.zeros((BOARD_XSIZE, BOARD_YSIZE), dtype=np.int8)
-        dead_channel = np.zeros((BOARD_XSIZE, BOARD_YSIZE), dtype=np.int8)
-        task_channel = self.state.tasks > 0
+        ax, ay = self.state.players[agent].location
 
-        for ip, p in enumerate(self.state.players):
-            x, y = p.location
-            if ip == player:
-                self_channel[y, x] = 1
-            if p.dead:
-                dead_channel[y, x] = 1
-            else:
-                player_channel[y, x] = 1
+        # how much to pad the observation with zeros
+        padding = ((OBS_XSIZE // 2, OBS_XSIZE // 2), (OBS_YSIZE // 2, OBS_YSIZE // 2))
+
+        # pad the dead and tasks channel and extract an OBS_XSIZE x OBS_YSIZE window around the player
+        dead_channel = np.pad(
+            self.state.dead > 0,
+            padding,
+        )[ax : ax + OBS_XSIZE, ay : ay + OBS_YSIZE]
+
+        task_channel = np.pad(
+            self.state.tasks > 0,
+            padding,
+        )[ax : ax + OBS_XSIZE, ay : ay + OBS_YSIZE]
+
+        wall_channel = np.pad(
+            np.zeros((BOARD_XSIZE, BOARD_YSIZE), dtype=np.bool_),
+            padding,
+            constant_values=1,
+        )[ax : ax + OBS_XSIZE, ay : ay + OBS_YSIZE]
+
+        impostor_channel = np.zeros((OBS_XSIZE, OBS_YSIZE), dtype=np.bool_)
+        crewmate_channel = np.zeros((OBS_XSIZE, OBS_YSIZE), dtype=np.bool_)
+        for p in self.state.players.values():
+            wx, wy = p.location
+            x = wx - ax + OBS_XSIZE // 2
+            y = wy - ay + OBS_YSIZE // 2
+            if x >= 0 and x < OBS_XSIZE and y >= 0 and y < OBS_YSIZE:
                 if p.impostor:
                     impostor_channel[y, x] = 1
                 else:
                     crewmate_channel[y, x] = 1
 
-        return Observation(
-            self_is_impostor,
-            player_channel,
-            task_channel,
-            self_channel,
-            impostor_channel,
-            crewmate_channel,
-            dead_channel,
-        )
-    
-    def game_over(self) -> bool:
-        return self.steps >= MAX_STEPS
+        return np.stack(
+            [
+                impostor_channel,
+                crewmate_channel,
+                dead_channel,
+                task_channel,
+                wall_channel,
+            ]
+        ).astype(np.bool_)
 
-    def game_over_for(self, player: Player) -> bool:
-        return self.state.players[player].dead or self.game_over()
-
-    def legal_mask(self, player: Player) -> np.ndarray[Any, np.dtype[np.bool8]]:
+    def legal_mask(self, agent: AgentID) -> np.ndarray[int, np.dtype[np.bool_]]:
         mask = np.ones(ACTION_SPACE_SIZE)
-        player_x, player_y = self.state.players[player].location
+        player_x, player_y = self.state.players[agent].location
 
         # forbid moving out of bounds
         if player_x == 0:
@@ -158,73 +165,98 @@ class Env():
 
         mask[Actions.WAIT] = 1
 
-        return mask.astype(np.bool8)
+        return mask.astype(np.bool_)
 
-    # play an action (since this is a multi-agent game, we'll only know the rewards at the end of the step)
-    def play(self, action: Action, player: Player) -> None:
-        # assert player is live
-        assert not self.state.players[player].dead
+    # this cache ensures that same space object is returned for the same agent
+    # allows action space seeding to work as expected
+    @functools.lru_cache(maxsize=None)
+    def observation_space(self, _: AgentID):
+        return spaces.MultiBinary([OBS_XSIZE, OBS_YSIZE, OBS_NUM_CHANNELS])
 
-        # make sure the move is legal
-        assert (self.legal_mask(player)[action] == 1)
+    @functools.lru_cache(maxsize=None)
+    def action_space(self, _: AgentID):
+        return spaces.Discrete(ACTION_SPACE_SIZE)
 
-        # change location of the player
-        player_x, player_y = self.state.players[player].location
-        match action:
-            case Actions.MOVE_LEFT:
-                player_x -= 1
-            case Actions.MOVE_RIGHT:
-                player_x += 1
-            case Actions.MOVE_UP:
-                player_y -= 1
-            case Actions.MOVE_DOWN:
-                player_y += 1
-            case Actions.WAIT:
-                pass
-            case _:
-                raise ValueError("Invalid action")
-        
-        # move player
-        self.state.players[player].location = (player_x, player_y)
+    def step(
+        self, actions: dict[AgentID, Action]
+    ) -> tuple[
+        # Observations
+        dict[AgentID, Observation],
+        # Reward
+        dict[AgentID, float],
+        # Terminated (do not use this agent again, an error will occur)
+        dict[AgentID, bool],
+        # Truncated (do not use this agent again, an error will occur)
+        dict[AgentID, bool],
+        # Info (nothing rn)
+        dict[str, dict],
+    ]:
+        # move all players according to their moves (not assuming they checked legal moves)
+        for agent, action in actions.items():
+            agent_x, agent_y = self.state.players[agent].location
+            match action:
+                case Actions.MOVE_LEFT:
+                    if agent_x != 0:
+                        agent_x -= 1
+                case Actions.MOVE_RIGHT:
+                    if agent_x != BOARD_XSIZE - 1:
+                        agent_x += 1
+                case Actions.MOVE_UP:
+                    if agent_y != 0:
+                        agent_y -= 1
+                case Actions.MOVE_DOWN:
+                    if agent_y != BOARD_YSIZE - 1:
+                        agent_y += 1
 
-    
-    # we pay out rewards when we step
-    def step(self)-> np.ndarray[Any, np.dtype[Reward]]:
         impostor_locs = np.zeros((BOARD_XSIZE, BOARD_YSIZE))
         crewmate_locs = np.zeros((BOARD_XSIZE, BOARD_YSIZE))
 
         # count impostors and crewmates in each location
-        for p in self.state.players:
-            if p.dead:
-                continue
+        for p in self.state.players.values():
             x, y = p.location
             if p.impostor:
                 impostor_locs[y, x] += 1
             else:
                 crewmate_locs[y, x] += 1
-
-        rewards = np.zeros(len(self.state.players), dtype=Reward)
+        observations = {k: self.observe(k) for k in self.state.players.keys()}
+        rewards = {k: 0.0 for k in self.state.players.keys()}
+        terminateds = {k: False for k in self.state.players.keys()}
+        truncateds = {k: False for k in self.state.players.keys()}
+        infos = {k: {} for k in self.state.players.keys()}
 
         # if impostor, we get a reward for each crewmate in the same location
-        for i, p in enumerate(self.state.players):
+        for k, p in self.state.players.items():
             if p.impostor:
                 x, y = p.location
-                rewards[i] += crewmate_locs[y, x]
-        
+                rewards[k] += crewmate_locs[y, x]
+
         # if crewmate, we get a reward if we are on the task location
         # we get a penalty and die if we are on the same location as an impostor
-        for i, p in enumerate(self.state.players):
-            if (not p.impostor) and (not p.dead):
+        for k, p in self.state.players.items():
+            if not p.impostor:
                 x, y = p.location
                 # award 0.5 for each task in the same location
                 # remove one of the tasks in the same location
                 if self.state.tasks[y, x] > 0:
-                    rewards[i] += 0.5
+                    rewards[k] += 0.5
                     self.state.tasks[y, x] -= 1
 
                 if impostor_locs[y, x] > 0:
-                    rewards[i] -= 0.5
-                    self.state.players[i].dead = True
+                    rewards[k] -= 0.5
+                    self.state.dead[y, x] += 1
+                    # delete
+                    terminateds[k] = True
+                    del self.state.players[k]
+                    self.agents.remove(k)
 
-        self.steps += 1
-        return rewards
+        return observations, rewards, terminateds, truncateds, infos
+
+    def reset(
+        self,
+        seed: Optional[int] = None,
+        return_info: bool = False,
+        options: Optional[dict] = None,
+    ) -> dict[AgentID, Observation]:
+        self.state = self.initial_state
+        self.agents = list(self.state.players.keys())
+        return {k: self.observe(k) for k in self.state.players.keys()}

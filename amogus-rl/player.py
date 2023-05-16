@@ -12,7 +12,7 @@ class Player(ABC):
         super().__init__()
 
     @abstractmethod
-    def play(self, e: env.Env) -> tuple[env.Observation, np.ndarray, env.Action]:
+    def play(self, impostor: bool, obs: env.Observation) -> env.Action:
         pass
 
     @abstractmethod
@@ -22,14 +22,14 @@ class Player(ABC):
 
 class ActorPlayer(Player):
     def __init__(
-            self,
-            impostor_actor: network.Actor,
-            impostor_critic: network.Critic,
-            impostor_step: int,
-            crewmate_actor: network.Actor,
-            crewmate_critic: network.Critic,
-            crewmate_step: int,
-        ) -> None:
+        self,
+        impostor_actor: network.Actor,
+        impostor_critic: network.Critic,
+        impostor_step: int,
+        crewmate_actor: network.Actor,
+        crewmate_critic: network.Critic,
+        crewmate_step: int,
+    ) -> None:
         self.impostor_actor = impostor_actor
         self.impostor_critic = impostor_critic
         self.impostor_step = impostor_step
@@ -37,35 +37,23 @@ class ActorPlayer(Player):
         self.crewmate_critic = crewmate_critic
         self.crewmate_step = crewmate_step
 
-    def play(self, player: env.Player, e: env.Env) -> tuple[env.Observation, np.ndarray, env.Action]:      
-        obs = e.observe(player)
-        actor = self.impostor_actor if obs.self_is_impostor else self.crewmate_actor
+    def play(self, impostor: bool, obs: env.Observation) -> env.Action:
+        actor = self.impostor_actor if impostor else self.crewmate_actor
 
         device = network.deviceof(actor)
 
-        action_probs = actor.forward(network.obs_to_tensor(obs, device))[
-            0].to("cpu").detach().numpy()
-
-        if np.isnan(action_probs).any():
-            raise ValueError("NaN found!")
-
-        action_entropy = scipy.stats.entropy(action_probs)
-
-        if action_entropy < 0.001:
-            raise ValueError("Entropy is too low!")
-
-        legal_mask = e.legal_mask(player)
-
-        raw_p = action_probs*legal_mask
-        p = raw_p/np.sum(raw_p)
-
-        chosen_action = env.Action(np.random.choice(len(p), p=p))
-
-        return (
-            obs,
-            action_probs,
-            chosen_action,
+        action_probs = (
+            actor.forward(network.obs_to_tensor(obs, device))[0]
+            .to("cpu")
+            .detach()
+            .numpy()
         )
+
+        chosen_action = env.Action(
+            np.random.choice(env.ACTION_SPACE_SIZE, p=action_probs)
+        )
+
+        return chosen_action
 
     def name(self) -> str:
         return f"nn_ckpt_crewmate{self.crewmate_step}_impostor{self.impostor_step}"
@@ -75,58 +63,29 @@ class RandomPlayer(Player):
     def __init__(self) -> None:
         pass
 
-    def play(self, player: env.Player, e: env.Env) -> tuple[env.Observation, np.ndarray, env.Action]:
-        obs = e.observe(player)
-        legal_mask = e.legal_mask(player)
-        action_prob = scipy.special.softmax(
-            np.random.random(size=len(legal_mask)))
-        chosen_action: env.Action = np.argmax(action_prob*legal_mask)
-
-        return (
-            obs,
-            action_prob,
-            chosen_action,
-        )
+    def play(self, impostor: bool, obs: env.Observation) -> env.Action:
+        return env.Action(np.random.choice(env.ACTION_SPACE_SIZE))
 
     def name(self) -> str:
         return "random"
 
 
-class WaitPlayer(Player):
-    def __init__(self) -> None:
-        pass
-
-    def play(self, player: env.Player, e: env.Env) -> tuple[env.Observation, np.ndarray, env.Action]:
-        obs = e.observe(player)
-
-        chosen_action = env.Actions.WAIT
-        action_prob = np.zeros(env.ACTION_SPACE_SIZE)
-
-        return (
-            obs,
-            action_prob,
-            chosen_action,
-        )
-
-    def name(self) -> str:
-        return "wait"
-
 class GreedyPlayer(Player):
     def __init__(self) -> None:
         pass
 
-    def play(self, player: env.Player, e: env.Env) -> tuple[env.Observation, np.ndarray, env.Action]:
-        obs = e.observe(player)
-
-        my_location = np.argwhere(obs.self_channel == 1)[0]
+    def play(self, impostor: bool, obs: env.Observation) -> env.Action:
+        my_location = env.OBS_XSIZE // 2, env.OBS_YSIZE // 2
 
         chosen_action = env.Actions.WAIT
 
-        if obs.self_is_impostor:
+        if impostor:
             # move towards nearest player if impostor
-            crewmate_locations = np.argwhere(obs.crewmate_channel == 1)
+            crewmate_locations = np.argwhere(obs[env.CREWMATE_CHANNEL] == 1)
             if len(crewmate_locations) != 0:
-                nearest_location = crewmate_locations[np.argmin(np.linalg.norm(crewmate_locations - my_location, axis=1))]
+                nearest_location = crewmate_locations[
+                    np.argmin(np.linalg.norm(crewmate_locations - my_location, axis=1))
+                ]
                 if nearest_location[0] > my_location[0]:
                     chosen_action = env.Actions.MOVE_DOWN
                 elif nearest_location[0] < my_location[0]:
@@ -137,9 +96,11 @@ class GreedyPlayer(Player):
                     chosen_action = env.Actions.MOVE_LEFT
         else:
             # if crewmate move towards nearest task
-            task_locations = np.argwhere(obs.task_channel == 1)
+            task_locations = np.argwhere(obs[env.TASK_CHANNEL] == 1)
             if len(task_locations) != 0:
-                nearest_location = task_locations[np.argmin(np.linalg.norm(task_locations - my_location, axis=1))]
+                nearest_location = task_locations[
+                    np.argmin(np.linalg.norm(task_locations - my_location, axis=1))
+                ]
                 if nearest_location[0] > my_location[0]:
                     chosen_action = env.Actions.MOVE_DOWN
                 elif nearest_location[0] < my_location[0]:
@@ -148,14 +109,8 @@ class GreedyPlayer(Player):
                     chosen_action = env.Actions.MOVE_RIGHT
                 elif nearest_location[1] < my_location[1]:
                     chosen_action = env.Actions.MOVE_LEFT
-        
-        action_prob = np.zeros(env.ACTION_SPACE_SIZE)
 
-        return (
-            obs,
-            action_prob,
-            chosen_action,
-        )
+        return chosen_action
 
     def name(self) -> str:
         return "greedy"
