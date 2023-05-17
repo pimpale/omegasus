@@ -1,7 +1,6 @@
 import numpy as np
 import pettingzoo
 from pettingzoo.utils.env import AgentID
-import gymnasium as gym
 from gym import spaces
 from dataclasses import dataclass
 from typing import Any, Optional, TypeAlias, Literal
@@ -63,19 +62,16 @@ class State:
     tasks: np.ndarray[Any, np.dtype[np.int8]]
 
 
-def print_action(action: Action):
-    if action == Actions.MOVE_LEFT:
-        print("Move Left")
-    elif action == Actions.MOVE_RIGHT:
-        print("Move Right")
-    elif action == Actions.MOVE_UP:
-        print("Move Up")
-    elif action == Actions.MOVE_DOWN:
-        print("Move Down")
-    elif action == Actions.WAIT:
-        print("Wait")
-    else:
-        print("Unknown Action")
+def print_action_description(action: Action) -> None:
+    """Prints a description of the given action."""
+    action_descriptions = {
+        Actions.MOVE_LEFT: "Move Left",
+        Actions.MOVE_RIGHT: "Move Right",
+        Actions.MOVE_UP: "Move Up",
+        Actions.MOVE_DOWN: "Move Down",
+        Actions.WAIT: "Wait",
+    }
+    print(action_descriptions[action])
 
 
 def print_obs(obs: np.ndarray):
@@ -95,6 +91,8 @@ def print_obs(obs: np.ndarray):
                 c = "📦"
             q += c
         print(q)
+
+
 class AmogusEnv(pettingzoo.ParallelEnv):
     metadata = {"render_modes": ["human"], "name": "amogus_env"}
 
@@ -112,76 +110,53 @@ class AmogusEnv(pettingzoo.ParallelEnv):
         # how much to pad the observation with zeros
         padding = ((OBS_YSIZE // 2, OBS_YSIZE // 2), (OBS_XSIZE // 2, OBS_XSIZE // 2))
 
-        # pad the dead and tasks channel and extract an OBS_YSIZE x OBS_XSIZE window around the player
-        dead_channel = np.pad(
-            self.state.dead > 0,
-            padding,
-            mode="constant",
-            constant_values=False,
-        )[ay : ay + OBS_YSIZE, ax : ax + OBS_XSIZE]
+        # Calculate the padded versions of dead, tasks, and wall channels
+        padded_dead = np.pad(self.state.dead > 0, padding)
+        padded_tasks = np.pad(self.state.tasks > 0, padding)
+        padded_wall = np.pad(np.ones((BOARD_YSIZE, BOARD_XSIZE), dtype=np.bool_), padding, constant_values=0)
 
-        task_channel = np.pad(
-            self.state.tasks > 0,
-            padding,
-            mode="constant",
-            constant_values=False,
-        )[ay : ay + OBS_YSIZE, ax : ax + OBS_XSIZE]
+        impostor_channel = np.zeros((OBS_YSIZE, OBS_XSIZE), dtype=np.bool_)
+        crewmate_channel = np.zeros((OBS_YSIZE, OBS_XSIZE), dtype=np.bool_)
 
-        wall_channel = np.ones((OBS_YSIZE, BOARD_XSIZE), dtype=np.bool_)
-        wall_channel[ay : ay + OBS_YSIZE, ax : ax + OBS_XSIZE] = False
+        player_locations = np.array([p.location for p in self.state.players.values()])
+        relative_locations = player_locations - np.array([ax, ay]) + np.array([OBS_XSIZE // 2, OBS_YSIZE // 2])
+        valid_indices = (relative_locations[:, 0] >= 0) & (relative_locations[:, 0] < OBS_XSIZE) & (relative_locations[:, 1] >= 0) & (relative_locations[:, 1] < OBS_YSIZE)
 
-        impostor_channel = np.full((OBS_YSIZE, OBS_XSIZE), False, dtype=np.bool_)
-        crewmate_channel = np.full((OBS_YSIZE, OBS_XSIZE), False, dtype=np.bool_)
-        impostor_channel[self.state.players.values()] = True
-        crewmate_channel[self.state.players.values() ^ self.state.impostors] = True
-
-        # cast rays from the player's location in all directions
-        rays = []
-        for i in range(360):
-            angle = i * np.pi / 180
-            dx = np.cos(angle)
-            dy = np.sin(angle)
-            rays.append((dx, dy))
-
-        # for each ray, check if it hits a wall or a player
-        for ray in rays:
-            x, y = ax, ay
-            while x >= 0 and x < BOARD_XSIZE and y >= 0 and y < BOARD_YSIZE:
-                if self.state.walls[y][x]:
-                    break
-                elif self.state.players[y][x]:
-                    if self.state.players[y][x].impostor:
-                        impostor_channel[y - ay][x - ax] = True
-                    else:
-                        crewmate_channel[y - ay][x - ax] = True
-                    break
-                x += dx
-                y += dy
+        impostor_channel[relative_locations[valid_indices, 1], relative_locations[valid_indices, 0]] = np.array([p.impostor for p in self.state.players.values()])[valid_indices]
+        crewmate_channel[relative_locations[valid_indices, 1], relative_locations[valid_indices, 0]] = np.array([not p.impostor for p in self.state.players.values()])[valid_indices]
 
         return np.stack(
             [
                 impostor_channel,
                 crewmate_channel,
-                dead_channel,
-                task_channel,
-                wall_channel,
+                padded_dead[ay:ay + OBS_YSIZE, ax:ax + OBS_XSIZE],
+                padded_tasks[ay:ay + OBS_YSIZE, ax:ax + OBS_XSIZE],
+                padded_wall[ay:ay + OBS_YSIZE, ax:ax + OBS_XSIZE],
             ]
-        ).astype(np.bool_)
+        )
+
 
 
     def legal_mask(self, agent: AgentID) -> np.ndarray[int, np.dtype[np.bool_]]:
-
-        mask = np.ones(ACTION_SPACE_SIZE, dtype=np.bool_)
+        """Returns a mask that indicates which actions are legal for the given agent."""
         player_x, player_y = self.state.players[agent].location
 
         # forbid moving out of bounds
-        mask[Actions.MOVE_LEFT] = player_x > 0
-        mask[Actions.MOVE_RIGHT] = player_x < BOARD_XSIZE - 1
-        mask[Actions.MOVE_UP] = player_y > 0
-        mask[Actions.MOVE_DOWN] = player_y < BOARD_YSIZE - 1
+        out_of_bounds = (
+            player_x == 0,
+            player_x == BOARD_XSIZE - 1,
+            player_y == 0,
+            player_y == BOARD_YSIZE - 1,
+        )
+        mask = np.ones(ACTION_SPACE_SIZE, dtype=np.bool_)
+        mask[out_of_bounds] = False
+
+        # always allow the WAIT action
+        mask[Actions.WAIT] = True
 
         return mask
-    
+
+
     # this cache ensures that same space object is returned for the same agent
     # allows action space seeding to work as expected
     @functools.lru_cache(maxsize=None)
@@ -192,14 +167,19 @@ class AmogusEnv(pettingzoo.ParallelEnv):
     def action_space(self, _: AgentID):
         return spaces.Discrete(ACTION_SPACE_SIZE)
 
-
     def step(
         self, actions: dict[AgentID, Action]
     ) -> tuple[
+        # Observations
+        dict[AgentID, Observation],
         # Reward
         dict[AgentID, float],
+        # Terminated (do not use this agent again, an error will occur)
+        dict[AgentID, bool],
         # Truncated (do not use this agent again, an error will occur)
         dict[AgentID, bool],
+        # Info (nothing rn)
+        dict[str, dict],
     ]:
         # move all players according to their moves (not assuming they checked legal moves)
         for agent, action in actions.items():
@@ -221,28 +201,40 @@ class AmogusEnv(pettingzoo.ParallelEnv):
                     pass
             self.state.players[agent].location = (agent_x, agent_y)
 
+        impostor_locs = np.zeros((BOARD_YSIZE, BOARD_XSIZE), dtype=int)
+        crewmate_locs = np.zeros((BOARD_YSIZE, BOARD_XSIZE), dtype=int)
+
         # count impostors and crewmates in each location
-        impostor_locs = np.zeros((BOARD_YSIZE, BOARD_XSIZE))
-        crewmate_locs = np.zeros((BOARD_YSIZE, BOARD_XSIZE))
         for p in self.state.players.values():
             x, y = p.location
             if p.impostor:
                 impostor_locs[y, x] += 1
             else:
                 crewmate_locs[y, x] += 1
-
-        # update rewards
+        observations = {k: self.observe(k) for k in self.state.players.keys()}
         rewards = {k: 0.0 for k in self.state.players.keys()}
+        terminateds = {k: False for k in self.state.players.keys()}
+        infos = {k: {} for k in self.state.players.keys()}
+
+        # if impostor, we get a reward for each crewmate in the same location
         for k, p in self.state.players.items():
             if p.impostor:
-                rewards[k] += crewmate_locs[p.location]
-            else:
-                if self.state.tasks[p.location] > 0:
+                rewards[k] += crewmate_locs[p.location[1], p.location[0]]
+
+        # if crewmate, we get a reward if we are on the task location
+        # if crewmate, we get a penalty and die if we are on the same location as an impostor
+        for k, p in self.state.players.items():
+            if not p.impostor:
+                # award 0.5 for each task in the same location
+                # remove one of the tasks in the same location
+                if self.state.tasks[p.location[1], p.location[0]] > 0:
                     rewards[k] += 0.5
-                    self.state.tasks[p.location] -= 1
-                if impostor_locs[p.location] > 0:
+                    self.state.tasks[p.location[1], p.location[0]] -= 1
+
+                if impostor_locs[p.location[1], p.location[0]] > 0:
                     rewards[k] -= 0.5
-                    self.state.dead[p.location] += 1
+                    self.state.dead[p.location[1], p.location[0]] += 1
+                    terminateds[k] = True
 
         # increment step counter
         self.steps += 1
@@ -253,12 +245,11 @@ class AmogusEnv(pettingzoo.ParallelEnv):
 
         # remove dead players
         self.state.players = {
-            k: p for k, p in self.state.players.items() if not (truncateds[k])
+            k: p for k, p in self.state.players.items() if not (terminateds[k] or truncateds[k])
         }
         self.agents = list(self.state.players.keys())
 
-        return rewards, truncateds
-
+        return observations, rewards, terminateds, truncateds, infos
 
     def reset(
         self,
