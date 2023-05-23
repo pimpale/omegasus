@@ -62,7 +62,7 @@ class State:
     tasks: np.ndarray[Any, np.dtype[np.int8]]
 
 
-def print_action_description(action: Action) -> None:
+def print_action(action: Action) -> None:
     """Prints a description of the given action."""
     action_descriptions = {
         Actions.MOVE_LEFT: "Move Left",
@@ -111,31 +111,57 @@ class AmogusEnv(pettingzoo.ParallelEnv):
         padding = ((OBS_YSIZE // 2, OBS_YSIZE // 2), (OBS_XSIZE // 2, OBS_XSIZE // 2))
 
         # Calculate the padded versions of dead, tasks, and wall channels
-        padded_dead = np.pad(self.state.dead > 0, padding)
-        padded_tasks = np.pad(self.state.tasks > 0, padding)
-        padded_wall = np.pad(np.ones((BOARD_YSIZE, BOARD_XSIZE), dtype=np.bool_), padding, constant_values=0)
+        # pad the dead and tasks channel and extract an OBS_YSIZE x OBS_XSIZE window around the player
+        dead_channel = np.pad(
+            self.state.dead > 0,
+            padding,
+        )[ay : ay + OBS_YSIZE, ax : ax + OBS_XSIZE]
+
+        task_channel = np.pad(
+            self.state.tasks > 0,
+            padding,
+        )[ay : ay + OBS_YSIZE, ax : ax + OBS_XSIZE]
+
+        wall_channel = np.pad(
+            np.zeros((BOARD_YSIZE, BOARD_XSIZE), dtype=np.bool_),
+            padding,
+            constant_values=1,
+        )[ay : ay + OBS_YSIZE, ax : ax + OBS_XSIZE]
 
         impostor_channel = np.zeros((OBS_YSIZE, OBS_XSIZE), dtype=np.bool_)
         crewmate_channel = np.zeros((OBS_YSIZE, OBS_XSIZE), dtype=np.bool_)
 
         player_locations = np.array([p.location for p in self.state.players.values()])
-        relative_locations = player_locations - np.array([ax, ay]) + np.array([OBS_XSIZE // 2, OBS_YSIZE // 2])
-        valid_indices = (relative_locations[:, 0] >= 0) & (relative_locations[:, 0] < OBS_XSIZE) & (relative_locations[:, 1] >= 0) & (relative_locations[:, 1] < OBS_YSIZE)
+        relative_locations = (
+            player_locations
+            - np.array([ax, ay])
+            + np.array([OBS_XSIZE // 2, OBS_YSIZE // 2])
+        )
+        valid_indices = (
+            (relative_locations[:, 0] >= 0)
+            & (relative_locations[:, 0] < OBS_XSIZE)
+            & (relative_locations[:, 1] >= 0)
+            & (relative_locations[:, 1] < OBS_YSIZE)
+        )
 
-        impostor_channel[relative_locations[valid_indices, 1], relative_locations[valid_indices, 0]] = np.array([p.impostor for p in self.state.players.values()])[valid_indices]
-        crewmate_channel[relative_locations[valid_indices, 1], relative_locations[valid_indices, 0]] = np.array([not p.impostor for p in self.state.players.values()])[valid_indices]
+        impostor_channel[
+            relative_locations[valid_indices, 1], relative_locations[valid_indices, 0]
+        ] = np.array([p.impostor for p in self.state.players.values()])[valid_indices]
+        crewmate_channel[
+            relative_locations[valid_indices, 1], relative_locations[valid_indices, 0]
+        ] = np.array([not p.impostor for p in self.state.players.values()])[
+            valid_indices
+        ]
 
         return np.stack(
             [
                 impostor_channel,
                 crewmate_channel,
-                padded_dead[ay:ay + OBS_YSIZE, ax:ax + OBS_XSIZE],
-                padded_tasks[ay:ay + OBS_YSIZE, ax:ax + OBS_XSIZE],
-                padded_wall[ay:ay + OBS_YSIZE, ax:ax + OBS_XSIZE],
+                dead_channel,
+                task_channel,
+                wall_channel,
             ]
         )
-
-
 
     def legal_mask(self, agent: AgentID) -> np.ndarray[int, np.dtype[np.bool_]]:
         """Returns a mask that indicates which actions are legal for the given agent."""
@@ -155,7 +181,6 @@ class AmogusEnv(pettingzoo.ParallelEnv):
         mask[Actions.WAIT] = True
 
         return mask
-
 
     # this cache ensures that same space object is returned for the same agent
     # allows action space seeding to work as expected
@@ -245,7 +270,9 @@ class AmogusEnv(pettingzoo.ParallelEnv):
 
         # remove dead players
         self.state.players = {
-            k: p for k, p in self.state.players.items() if not (terminateds[k] or truncateds[k])
+            k: p
+            for k, p in self.state.players.items()
+            if not (terminateds[k] or truncateds[k])
         }
         self.agents = list(self.state.players.keys())
 

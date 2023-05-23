@@ -8,13 +8,14 @@ import torch.nn.functional as F
 from env import ACTION_SPACE_SIZE, OBS_XSIZE, OBS_YSIZE, OBS_NUM_CHANNELS
 
 # Hyperparameters
-BOARD_CONV_FILTERS = 10
+BOARD_CONV_FILTERS = 64
 
 ACTOR_LR = 1e-4  # Lower lr stabilises training greatly
-CRITIC_LR = 5e-4  # Lower lr stabilises training greatly
-GAMMA = 0.90
+CRITIC_LR = 1e-5  # Lower lr stabilises training greatly
+GAMMA = 0.70
 PPO_EPS = 0.2
 PPO_EPOCHS = 20
+ENTROPY_BONUS = 0.1
 
 
 # output in (Batch, Channel, Width, Height)
@@ -45,8 +46,8 @@ class Critic(nn.Module):
             kernel_size=3,
             padding="same",
         )
-        self.fc1 = nn.Linear(OBS_XSIZE * OBS_YSIZE * BOARD_CONV_FILTERS, 256)
-        self.fc2 = nn.Linear(256, 1)
+        self.fc1 = nn.Linear(OBS_XSIZE * OBS_YSIZE * BOARD_CONV_FILTERS, 512)
+        self.fc2 = nn.Linear(512, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # cast to float32
@@ -79,8 +80,8 @@ class Actor(nn.Module):
             kernel_size=3,
             padding="same",
         )
-        self.fc1 = nn.Linear(OBS_XSIZE * OBS_YSIZE * BOARD_CONV_FILTERS, 256)
-        self.fc2 = nn.Linear(256, ACTION_SPACE_SIZE)
+        self.fc1 = nn.Linear(OBS_XSIZE * OBS_YSIZE * BOARD_CONV_FILTERS, 512)
+        self.fc2 = nn.Linear(512, ACTION_SPACE_SIZE)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # cast to float32
@@ -135,7 +136,7 @@ def compute_ppo_loss(
     # in (Batch,)
     entropy_at_t = -torch.sum(torch.log(pi_theta_given_st) * pi_theta_given_st, 1)
 
-    total_loss_at_t = -ppo2loss_at_t - 0.1 * entropy_at_t
+    total_loss_at_t = -ppo2loss_at_t - ENTROPY_BONUS * entropy_at_t
 
     # we take the average loss over all examples
     return total_loss_at_t.mean()
@@ -177,7 +178,9 @@ def train_ppo(
     )
 
     # in (Batch, Action)
-    old_policy_action_probs_batch_tensor = actor.forward(observation_batch_tensor).detach()
+    old_policy_action_probs_batch_tensor = actor.forward(
+        observation_batch_tensor
+    ).detach()
 
     # in (Batch,)
     advantage_batch_tensor = torch.tensor(advantage_batch).to(device)
@@ -219,21 +222,21 @@ def compute_advantage(
     assert len(trajectory_observations) == trajectory_len
     assert len(trajectory_rewards) == trajectory_len
 
-    trajectory_advantages = np.zeros(trajectory_len)
+    trajectory_reward_to_go = np.zeros(trajectory_len)
 
     # calculate the value of the state at the end
-    last_obs = obs_to_tensor(
-        trajectory_observations[-1], next(critic.parameters()).device
-    )
-    last_obs_value = critic.forward(last_obs)[0]
+    obs_tensor = obs_batch_to_tensor(trajectory_observations, deviceof(critic))
+    obs_values = critic.forward(obs_tensor).detach().cpu().numpy()
 
-    trajectory_advantages[-1] = last_obs_value + trajectory_rewards[-1]
+    trajectory_reward_to_go[-1] = trajectory_rewards[-1]
 
     # Use GAMMA to decay the advantage
     for t in reversed(range(trajectory_len - 1)):
-        trajectory_advantages[t] = (
-            trajectory_rewards[t] + GAMMA * trajectory_advantages[t + 1]
+        trajectory_reward_to_go[t] = (
+            trajectory_rewards[t] + GAMMA * trajectory_reward_to_go[t + 1]
         )
+
+    trajectory_advantages = trajectory_reward_to_go - 0.1*obs_values
 
     return list(trajectory_advantages)
 
