@@ -1,0 +1,42 @@
+env: amongus_env
+framework: torch
+model:
+  custom_preprocessor: custom_preprocessor
+  custom_model: actor
+  custom_model_config:
+    obs_space: env.observation_space
+    action_space: env.action_space
+    num_outputs: env.action_space.n
+    board_width: 8
+    board_height: 8
+    board_conv_filters: 64
+  custom_model_2: critic
+  custom_model_config_2:
+    obs_space: env.observation_space
+    action_space: env.action_space
+    board_width: 8
+    board_height: 8
+    board_conv_filters: 64
+    num_outputs: 1
+  fcnet_activation: relu
+  fcnet_hiddens: [64, 64]
+lr:
+  actor: 1e-4
+  critic: 1e-4
+multiagent:
+  policies:
+    ppo_policy: (CustomPPOTorchPolicy, env.observation_space, env.action_space, {})
+  policy_mapping_fn: !!python/object/apply:__main__.lambda [agent_id, "ppo_policy"]
+gamma: 0.90
+num_sgd_iter: 10
+sgd_minibatch_size: 64
+num_workers: 1
+num_envs_per_worker: 1
+train_batch_size: 1000
+rollout_fragment_length: 200
+clip_param: 0.2
+lambda: 0.95
+kl_coeff: 0.0
+vf_clip_param: 0.0
+vf_loss_coeff: 0.5
+entropy_coeff: 0.01
