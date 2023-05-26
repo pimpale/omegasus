@@ -9,7 +9,7 @@ import env
 
 from ray import tune
 from ray.rllib.models import ModelCatalog, TorchModelV2
-from ray.rllib.policy.zsample_batch import SampleBatch
+from ray.rllib.policy.sample_batch import SampleBatch
 from ray.rllib.policy import Policy, register_policy
 from ray.rllib.agents import ppo
 from ray.rllib.agents.ppo import PPOTrainer
