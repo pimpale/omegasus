@@ -8,14 +8,14 @@ import torch.nn.functional as F
 from env import ACTION_SPACE_SIZE, OBS_XSIZE, OBS_YSIZE, OBS_NUM_CHANNELS
 
 # Hyperparameters
-BOARD_CONV_FILTERS = 64
+BOARD_CONV_FILTERS = 100
 
 ACTOR_LR = 1e-4  # Lower lr stabilises training greatly
 CRITIC_LR = 1e-5  # Lower lr stabilises training greatly
-GAMMA = 0.70
+GAMMA = 0.7
 PPO_EPS = 0.2
 PPO_EPOCHS = 20
-ENTROPY_BONUS = 0.1
+ENTROPY_BONUS = 0.15
 
 
 # output in (Batch, Channel, Width, Height)
@@ -236,7 +236,7 @@ def compute_advantage(
             trajectory_rewards[t] + GAMMA * trajectory_reward_to_go[t + 1]
         )
 
-    trajectory_advantages = trajectory_reward_to_go - 0.1*obs_values
+    trajectory_advantages = trajectory_reward_to_go #- obs_values
 
     return list(trajectory_advantages)
 
