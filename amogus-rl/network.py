@@ -21,15 +21,21 @@ ENTROPY_BONUS = 0.15
 # output in (Batch, Channel, Width, Height)
 def obs_batch_to_tensor(
     o_batch: list[env.Observation], device: torch.device
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
+    x_batch = [o.view for o in o_batch]
+    t_batch = [o.t for o in o_batch]
     # Convert state batch into correct format
-    return torch.from_numpy(np.stack(o_batch)).to(device)
+    return (
+        torch.from_numpy(np.stack(x_batch)).to(device),
+        torch.tensor(t_batch, dtype=torch.int32, device=device),
+    )
 
 
 # output in (Batch, Channel, Width, Height)
-def obs_to_tensor(o: env.Observation, device: torch.device) -> torch.Tensor:
-    # we need to add a batch axis and then convert into a tensor
-    return torch.from_numpy(np.stack([o])).to(device)
+def obs_to_tensor(
+    o: env.Observation, device: torch.device
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return obs_batch_to_tensor([o], device)
 
 
 def deviceof(m: nn.Module) -> torch.device:
@@ -46,18 +52,23 @@ class Critic(nn.Module):
             kernel_size=3,
             padding="same",
         )
-        self.fc1 = nn.Linear(OBS_XSIZE * OBS_YSIZE * BOARD_CONV_FILTERS, 512)
+        self.fc1 = nn.Linear(OBS_XSIZE * OBS_YSIZE * BOARD_CONV_FILTERS + 1, 512)
         self.fc2 = nn.Linear(512, 1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         # cast to float32
         # x in (Batch, Width, Height)
         x = x.to(torch.float32)
+        # t in (Batch,)
+        t = t.to(torch.float32)
+        # t in (Batch,1)
+        t = t.view((-1, 1))
         # apply convolutions
         x = self.conv1(x)
         x = F.relu(x)
         # flatten everything except for batch
         x = torch.flatten(x, 1)
+        x = torch.hstack([x, t])
         # fully connected layers
         x = self.fc1(x)
         x = F.relu(x)
@@ -165,7 +176,9 @@ def train_ppo(
     # convert data to tensors on correct device
 
     # in (Batch, Width, Height)
-    observation_batch_tensor = obs_batch_to_tensor(observation_batch, device)
+    obsx_batch_tensor, obst_batch_tensor = obs_batch_to_tensor(
+        observation_batch, device
+    )
 
     # in (Batch,)
     true_value_batch_tensor = torch.tensor(
@@ -178,9 +191,7 @@ def train_ppo(
     )
 
     # in (Batch, Action)
-    old_policy_action_probs_batch_tensor = actor.forward(
-        observation_batch_tensor
-    ).detach()
+    old_policy_action_probs_batch_tensor = actor.forward(obsx_batch_tensor).detach()
 
     # in (Batch,)
     advantage_batch_tensor = torch.tensor(advantage_batch).to(device)
@@ -189,7 +200,7 @@ def train_ppo(
     actor_losses: list[float] = []
     for _ in range(PPO_EPOCHS):
         actor_optimizer.zero_grad()
-        current_policy_action_probs = actor.forward(observation_batch_tensor)
+        current_policy_action_probs = actor.forward(obsx_batch_tensor)
         actor_loss = compute_ppo_loss(
             old_policy_action_probs_batch_tensor,
             current_policy_action_probs,
@@ -202,7 +213,7 @@ def train_ppo(
 
     # train critic
     critic_optimizer.zero_grad()
-    pred_value_batch_tensor = critic.forward(observation_batch_tensor)
+    pred_value_batch_tensor = critic.forward(obsx_batch_tensor, obst_batch_tensor)
     critic_loss = F.mse_loss(pred_value_batch_tensor, true_value_batch_tensor)
     critic_loss.backward()
     critic_optimizer.step()
@@ -225,8 +236,10 @@ def compute_advantage(
     trajectory_reward_to_go = np.zeros(trajectory_len)
 
     # calculate the value of the state at the end
-    obs_tensor = obs_batch_to_tensor(trajectory_observations, deviceof(critic))
-    obs_values = critic.forward(obs_tensor).detach().cpu().numpy()
+    obsx_tensor, obst_tensor = obs_batch_to_tensor(
+        trajectory_observations, deviceof(critic)
+    )
+    obs_values = critic.forward(obsx_tensor, obst_tensor).detach().cpu().numpy()
 
     trajectory_reward_to_go[-1] = trajectory_rewards[-1]
 
@@ -236,7 +249,7 @@ def compute_advantage(
             trajectory_rewards[t] + GAMMA * trajectory_reward_to_go[t + 1]
         )
 
-    trajectory_advantages = trajectory_reward_to_go #- obs_values
+    trajectory_advantages = trajectory_reward_to_go  - obs_values
 
     return list(trajectory_advantages)
 

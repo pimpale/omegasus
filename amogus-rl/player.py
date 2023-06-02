@@ -43,7 +43,7 @@ class ActorPlayer(Player):
         device = network.deviceof(actor)
 
         action_probs = (
-            actor.forward(network.obs_to_tensor(obs, device))[0]
+            actor.forward(network.obs_to_tensor(obs, device)[0])[0]
             .to("cpu")
             .detach()
             .numpy()
@@ -81,7 +81,7 @@ class GreedyPlayer(Player):
 
         if impostor:
             # move towards nearest player if impostor
-            crewmate_locations = np.argwhere(obs[env.CREWMATE_CHANNEL] == 1)
+            crewmate_locations = np.argwhere(obs.view[env.CREWMATE_CHANNEL] == 1)
             if len(crewmate_locations) != 0:
                 nearest_location = crewmate_locations[
                     np.argmin(np.linalg.norm(crewmate_locations - my_location, axis=1))
@@ -96,7 +96,7 @@ class GreedyPlayer(Player):
                     chosen_action = env.Actions.MOVE_LEFT
         else:
             # if crewmate move towards nearest task
-            task_locations = np.argwhere(obs[env.TASK_CHANNEL] == 1)
+            task_locations = np.argwhere(obs.view[env.TASK_CHANNEL] == 1)
             if len(task_locations) != 0:
                 nearest_location = task_locations[
                     np.argmin(np.linalg.norm(task_locations - my_location, axis=1))

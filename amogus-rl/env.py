@@ -7,8 +7,8 @@ from typing import Any, Optional, TypeAlias, Literal
 import functools
 
 # size of game board
-BOARD_XSIZE = 5
-BOARD_YSIZE = 5
+BOARD_XSIZE = 7
+BOARD_YSIZE = 7
 
 MAX_STEPS = 25
 
@@ -16,8 +16,8 @@ MAX_STEPS = 25
 ACTION_SPACE_SIZE = 5  # U, D, L, R, W
 
 # size of the observation (player is located at the center)
-OBS_XSIZE = 5
-OBS_YSIZE = 5
+OBS_XSIZE = 7
+OBS_YSIZE = 7
 # impostors, crewmates, dead, tasks, wall
 OBS_NUM_CHANNELS = 5
 
@@ -50,7 +50,10 @@ class PlayerState:
     impostor: bool
 
 
-Observation: TypeAlias = np.ndarray[int, np.dtype[np.bool_]]
+@dataclass
+class Observation:
+    view: np.ndarray[int, np.dtype[np.bool_]]
+    t: int
 
 
 @dataclass
@@ -74,14 +77,14 @@ def print_action(action: Action) -> None:
     print(action_descriptions[action])
 
 
-def print_obs(obs: np.ndarray):
+def stringify_obs(o: Observation):
+    obs = o.view
+    out = ""
     for y in range(OBS_YSIZE):
         q = ""
         for x in range(OBS_XSIZE):
             c = "⬛"
-            if obs[DEAD_CHANNEL, y, x]:
-                c = "💀"
-            elif obs[IMPOSTOR_CHANNEL, y, x]:
+            if obs[IMPOSTOR_CHANNEL, y, x]:
                 c = "👽"
             elif obs[CREWMATE_CHANNEL, y, x]:
                 c = "🧑‍🚀"
@@ -89,8 +92,11 @@ def print_obs(obs: np.ndarray):
                 c = "🧱"
             elif obs[TASK_CHANNEL, y, x]:
                 c = "📦"
+            elif obs[DEAD_CHANNEL, y, x]:
+                c = "💀"
             q += c
-        print(q)
+        out += q + "\n"
+    return out
 
 
 class AmogusEnv(pettingzoo.ParallelEnv):
@@ -153,14 +159,17 @@ class AmogusEnv(pettingzoo.ParallelEnv):
             valid_indices
         ]
 
-        return np.stack(
-            [
-                impostor_channel,
-                crewmate_channel,
-                dead_channel,
-                task_channel,
-                wall_channel,
-            ]
+        return Observation(
+            np.stack(
+                [
+                    impostor_channel,
+                    crewmate_channel,
+                    dead_channel,
+                    task_channel,
+                    wall_channel,
+                ]
+            ),
+            MAX_STEPS - self.steps,
         )
 
     def legal_mask(self, agent: AgentID) -> np.ndarray[int, np.dtype[np.bool_]]:
