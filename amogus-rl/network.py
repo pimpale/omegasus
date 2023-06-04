@@ -11,7 +11,7 @@ from env import ACTION_SPACE_SIZE, OBS_XSIZE, OBS_YSIZE, OBS_NUM_CHANNELS
 BOARD_CONV_FILTERS = 100
 
 ACTOR_LR = 1e-4  # Lower lr stabilises training greatly
-CRITIC_LR = 1e-5  # Lower lr stabilises training greatly
+CRITIC_LR = 1e-4  # Lower lr stabilises training greatly
 GAMMA = 0.7
 PPO_EPS = 0.2
 PPO_EPOCHS = 20
@@ -53,7 +53,8 @@ class Critic(nn.Module):
             padding="same",
         )
         self.fc1 = nn.Linear(OBS_XSIZE * OBS_YSIZE * BOARD_CONV_FILTERS + 1, 512)
-        self.fc2 = nn.Linear(512, 1)
+        self.fc2 = nn.Linear(512, 256)
+        self.fc3 = nn.Linear(256, 1)
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         # cast to float32
@@ -73,6 +74,8 @@ class Critic(nn.Module):
         x = self.fc1(x)
         x = F.relu(x)
         x = self.fc2(x)
+        x = F.relu(x)
+        x = self.fc3(x)
         # delete extra dimension
         # output in (Batch,)
         output = x.view((x.shape[0]))
@@ -249,7 +252,7 @@ def compute_advantage(
             trajectory_rewards[t] + GAMMA * trajectory_reward_to_go[t + 1]
         )
 
-    trajectory_advantages = trajectory_reward_to_go  - obs_values
+    trajectory_advantages = trajectory_reward_to_go  # - obs_values
 
     return list(trajectory_advantages)
 
