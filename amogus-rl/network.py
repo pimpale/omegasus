@@ -8,14 +8,16 @@ import torch.nn.functional as F
 from env import ACTION_SPACE_SIZE, OBS_XSIZE, OBS_YSIZE, OBS_NUM_CHANNELS
 
 # Hyperparameters
-BOARD_CONV_FILTERS = 100
+BOARD_CONV_FILTERS = 256
 
 ACTOR_LR = 1e-4  # Lower lr stabilises training greatly
 CRITIC_LR = 1e-4  # Lower lr stabilises training greatly
-GAMMA = 0.7
+GAMMA = 0.5
 PPO_EPS = 0.2
-PPO_EPOCHS = 20
+PPO_EPOCHS = 10
 ENTROPY_BONUS = 0.15
+
+CRITIC_EPOCHS = 10
 
 
 # output in (Batch, Channel, Width, Height)
@@ -49,12 +51,17 @@ class Critic(nn.Module):
         self.conv1 = nn.Conv2d(
             in_channels=OBS_NUM_CHANNELS,
             out_channels=BOARD_CONV_FILTERS,
-            kernel_size=3,
+            kernel_size=5,
+            padding="same",
+        )
+        self.conv2 = nn.Conv2d(
+            in_channels=BOARD_CONV_FILTERS,
+            out_channels=BOARD_CONV_FILTERS,
+            kernel_size=5,
             padding="same",
         )
         self.fc1 = nn.Linear(OBS_XSIZE * OBS_YSIZE * BOARD_CONV_FILTERS + 1, 512)
-        self.fc2 = nn.Linear(512, 256)
-        self.fc3 = nn.Linear(256, 1)
+        self.fc2 = nn.Linear(512, 1)
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         # cast to float32
@@ -67,6 +74,8 @@ class Critic(nn.Module):
         # apply convolutions
         x = self.conv1(x)
         x = F.relu(x)
+        x = self.conv2(x)
+        x = F.relu(x)
         # flatten everything except for batch
         x = torch.flatten(x, 1)
         x = torch.hstack([x, t])
@@ -74,8 +83,6 @@ class Critic(nn.Module):
         x = self.fc1(x)
         x = F.relu(x)
         x = self.fc2(x)
-        x = F.relu(x)
-        x = self.fc3(x)
         # delete extra dimension
         # output in (Batch,)
         output = x.view((x.shape[0]))
@@ -91,7 +98,13 @@ class Actor(nn.Module):
         self.conv1 = nn.Conv2d(
             in_channels=OBS_NUM_CHANNELS,
             out_channels=BOARD_CONV_FILTERS,
-            kernel_size=3,
+            kernel_size=5,
+            padding="same",
+        )
+        self.conv2 = nn.Conv2d(
+            in_channels=BOARD_CONV_FILTERS,
+            out_channels=BOARD_CONV_FILTERS,
+            kernel_size=5,
             padding="same",
         )
         self.fc1 = nn.Linear(OBS_XSIZE * OBS_YSIZE * BOARD_CONV_FILTERS, 512)
@@ -103,6 +116,8 @@ class Actor(nn.Module):
         x = x.to(torch.float32)
         # apply convolutions
         x = self.conv1(x)
+        x = F.relu(x)
+        x = self.conv2(x)
         x = F.relu(x)
         # flatten everything except for batch
         x = torch.flatten(x, 1)
@@ -134,6 +149,10 @@ def compute_ppo_loss(
     # Advantage of the chosen action
     A_pi_theta_given_st_at: torch.Tensor,
 ) -> torch.Tensor:
+    
+    # ReLU the advantage, as suggested in https://arxiv.org/abs/2306.01460
+    A_pi_theta_given_st_at = torch.relu(A_pi_theta_given_st_at)
+
     # in (Batch,)
     pi_theta_given_st_at = torch.sum(pi_theta_given_st * a_t, 1)
     pi_thetak_given_st_at = torch.sum(pi_thetak_given_st * a_t, 1)
@@ -215,14 +234,17 @@ def train_ppo(
         actor_losses.append(actor_loss.item())
 
     # train critic
-    critic_optimizer.zero_grad()
-    pred_value_batch_tensor = critic.forward(obsx_batch_tensor, obst_batch_tensor)
-    critic_loss = F.mse_loss(pred_value_batch_tensor, true_value_batch_tensor)
-    critic_loss.backward()
-    critic_optimizer.step()
+    critic_losses: list[float] = []
+    for _ in range(CRITIC_EPOCHS):
+        critic_optimizer.zero_grad()
+        pred_value_batch_tensor = critic.forward(obsx_batch_tensor, obst_batch_tensor)
+        critic_loss = F.mse_loss(pred_value_batch_tensor, true_value_batch_tensor)
+        critic_loss.backward()
+        critic_optimizer.step()
+        critic_losses.append(float(critic_loss))
 
     # return the respective losses
-    return (actor_losses, [float(critic_loss)] * PPO_EPOCHS)
+    return (actor_losses, critic_losses)
 
 
 # computes advantage using Generalized Advantage Estimation
@@ -252,7 +274,7 @@ def compute_advantage(
             trajectory_rewards[t] + GAMMA * trajectory_reward_to_go[t + 1]
         )
 
-    trajectory_advantages = trajectory_reward_to_go  # - obs_values
+    trajectory_advantages = trajectory_reward_to_go  - obs_values
 
     return list(trajectory_advantages)
 

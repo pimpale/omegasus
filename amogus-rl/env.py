@@ -10,7 +10,7 @@ import functools
 BOARD_XSIZE = 7
 BOARD_YSIZE = 7
 
-MAX_STEPS = 50
+MAX_STEPS = 32
 
 # size of the action space
 ACTION_SPACE_SIZE = 5  # U, D, L, R, W
