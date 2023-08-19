@@ -1,7 +1,6 @@
 import numpy as np
 import pettingzoo
-from pettingzoo.utils.env import AgentID
-from gym import spaces
+from gymnasium import spaces
 from dataclasses import dataclass
 from typing import Any, Optional, TypeAlias, Literal
 import functools
@@ -60,7 +59,7 @@ class Observation:
 class State:
     """Overall state of the game"""
 
-    players: dict[AgentID, PlayerState]
+    players: dict[str, PlayerState]
     dead: np.ndarray[Any, np.dtype[np.int8]]
     tasks: np.ndarray[Any, np.dtype[np.int8]]
 
@@ -68,11 +67,11 @@ class State:
 def print_action(action: Action) -> None:
     """Prints a description of the given action."""
     action_descriptions = {
-        Actions.MOVE_LEFT: "Move Left",
-        Actions.MOVE_RIGHT: "Move Right",
-        Actions.MOVE_UP: "Move Up",
-        Actions.MOVE_DOWN: "Move Down",
-        Actions.WAIT: "Wait",
+        int(Actions.MOVE_LEFT): "Move Left",
+        int(Actions.MOVE_RIGHT): "Move Right",
+        int(Actions.MOVE_UP): "Move Up",
+        int(Actions.MOVE_DOWN): "Move Down",
+        int(Actions.WAIT): "Wait",
     }
     print(action_descriptions[action])
 
@@ -99,7 +98,7 @@ def stringify_obs(o: Observation):
     return out
 
 
-class AmogusEnv(pettingzoo.ParallelEnv):
+class AmogusEnv(pettingzoo.ParallelEnv[str, Observation, Action]):
     metadata = {"render_modes": ["human"], "name": "amogus_env"}
 
     def __init__(self, initial_state: State, render_mode=None):
@@ -109,7 +108,7 @@ class AmogusEnv(pettingzoo.ParallelEnv):
         self.possible_agents = list(self.state.players.keys())
         self.steps = 0
 
-    def observe(self, agent: AgentID) -> Observation:
+    def observe(self, agent: str) -> Observation:
         """Observation by a single player of the game"""
         ax, ay = self.state.players[agent].location
 
@@ -172,7 +171,7 @@ class AmogusEnv(pettingzoo.ParallelEnv):
             MAX_STEPS - self.steps,
         )
 
-    def legal_mask(self, agent: AgentID) -> np.ndarray[int, np.dtype[np.bool_]]:
+    def legal_mask(self, agent: str) -> np.ndarray[int, np.dtype[np.bool_]]:
         """Returns a mask that indicates which actions are legal for the given agent."""
         player_x, player_y = self.state.players[agent].location
 
@@ -194,24 +193,24 @@ class AmogusEnv(pettingzoo.ParallelEnv):
     # this cache ensures that same space object is returned for the same agent
     # allows action space seeding to work as expected
     @functools.lru_cache(maxsize=None)
-    def observation_space(self, _: AgentID):
+    def observation_space(self, _: str):
         return spaces.MultiBinary([OBS_NUM_CHANNELS, OBS_YSIZE, OBS_YSIZE])
 
     @functools.lru_cache(maxsize=None)
-    def action_space(self, _: AgentID):
+    def action_space(self, _: str):
         return spaces.Discrete(ACTION_SPACE_SIZE)
 
     def step(
-        self, actions: dict[AgentID, Action]
+        self, actions: dict[str, Action]
     ) -> tuple[
         # Observations
-        dict[AgentID, Observation],
+        dict[str, Observation],
         # Reward
-        dict[AgentID, float],
+        dict[str, float],
         # Terminated (do not use this agent again, an error will occur)
-        dict[AgentID, bool],
+        dict[str, bool],
         # Truncated (do not use this agent again, an error will occur)
-        dict[AgentID, bool],
+        dict[str, bool],
         # Info (nothing rn)
         dict[str, dict],
     ]:
@@ -292,7 +291,7 @@ class AmogusEnv(pettingzoo.ParallelEnv):
         seed: Optional[int] = None,
         return_info: bool = False,
         options: Optional[dict] = None,
-    ) -> dict[AgentID, Observation]:
+    ) -> dict[str, Observation]:
         self.state = self.initial_state
         self.agents = list(self.state.players.keys())
         self.steps = 0
