@@ -1,5 +1,5 @@
 # omegasus
-A deep learning simulation of Among Us.
+PPO self-play agents + fine-tuned GPT-2 dialogue (4.6x BLEU over baseline). UCLA ECE 147 final project.
 
 [Paper](./ECE_147___Final_Report.pdf)
 
